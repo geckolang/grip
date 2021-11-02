@@ -46,12 +46,15 @@ fn main() -> Result<(), String> {
 
   if namespace_result.is_err() {
     println!("parse_error: {:?}", namespace_result.err());
+
     return Err(String::from("failed to parse namespace"));
   }
 
   let visitation_result = llvm_lowering_pass.visit_namespace(&namespace_result.ok().unwrap());
 
   if visitation_result.is_err() {
+    println!("lowering_error: {:?}", visitation_result.err());
+
     return Err(String::from(
       "visiting namespace yielded an error; module will not be emitted",
     ));

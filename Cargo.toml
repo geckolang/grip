@@ -8,5 +8,5 @@ edition = "2018"
 [dependencies]
 # ionlang = { git = "https://github.com/ionlang/ionlang-rs", branch = "master" }
 clap = "2.33.3"
-ionlang = { path = "../ionir-rs" }
+ionlang = { path = "../ionlang-rs" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
