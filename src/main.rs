@@ -4,6 +4,13 @@ extern crate ionlang;
 use clap::{App, Arg};
 use ionlang::{llvm_lowering_pass, pass::*};
 
+fn find_top_level_node_name(top_level_node: &ionlang::package::TopLevelNode) -> String {
+  match top_level_node {
+    ionlang::package::TopLevelNode::Function(function) => function.prototype.name.clone(),
+    ionlang::package::TopLevelNode::External(external) => external.prototype.name.clone(),
+  }
+}
+
 fn main() -> Result<(), String> {
   let matches = App::new("ilc")
     .version("1.0")
@@ -26,7 +33,7 @@ fn main() -> Result<(), String> {
   let mut lexer = ionlang::lexer::Lexer::new(file_contents.unwrap().chars().collect());
   let llvm_context = inkwell::context::Context::create();
   let llvm_module = llvm_context.create_module("ilc");
-  let mut pass_manager = ionlang::pass_manager::PassManager::new();
+  // let mut pass_manager = ionlang::pass_manager::PassManager::new();
 
   // TODO: Finish implementation.
 
@@ -39,25 +46,73 @@ fn main() -> Result<(), String> {
 
   let tokens = lexer.collect();
 
-  println!("Tokens: {:?}", tokens);
+  println!("Tokens: {:?}\n\n", tokens);
 
   let mut parser = ionlang::parser::Parser::new(tokens);
-  let namespace_result = parser.parse_namespace();
+  let package_result = parser.parse_package_decl();
 
-  if namespace_result.is_err() {
-    println!("parse_error: {:?}", namespace_result.err());
+  if package_result.is_err() {
+    println!("parse_error: {:?}", package_result.err());
 
-    return Err(String::from("failed to parse namespace"));
+    return Err(String::from("failed to parse package declaration"));
   }
 
-  let visitation_result = llvm_lowering_pass.visit_namespace(&namespace_result.ok().unwrap());
+  let mut package = package_result.unwrap();
 
-  if visitation_result.is_err() {
-    println!("lowering_error: {:?}", visitation_result.err());
+  while !parser.is_eof() {
+    let top_level_node_result = parser.parse_top_level_node();
 
-    return Err(String::from(
-      "visiting namespace yielded an error; module will not be emitted",
-    ));
+    if top_level_node_result.is_err() {
+      println!("parse_error: {:?}", top_level_node_result.err());
+
+      return Err(String::from("failed to parse top-level construct"));
+    }
+
+    let top_level_node = top_level_node_result.unwrap();
+
+    package
+      .symbol_table
+      .insert(find_top_level_node_name(&top_level_node), top_level_node);
+  }
+
+  let mut entry_point_check_pass = ionlang::entry_point_check_pass::EntryPointCheckPass {};
+  let mut type_check_pass = ionlang::type_check_pass::TypeCheckPass {};
+
+  for top_level_node in package.symbol_table.values() {
+    match top_level_node {
+      ionlang::package::TopLevelNode::Function(function) => {
+        let entry_point_check_result = entry_point_check_pass.visit_function(&function);
+
+        if entry_point_check_result.is_err() {
+          println!(
+            "entry_point_check_error: {:?}",
+            entry_point_check_result.err()
+          );
+
+          return Err(String::from("failed to check entry point"));
+        }
+
+        let type_check_result = type_check_pass.visit_function(&function);
+
+        if type_check_result.is_err() {
+          println!("type_check_error: {:?}", type_check_result.err());
+
+          return Err(format!(
+            "failed to type-check function `{}`",
+            function.prototype.name
+          ));
+        }
+      }
+      _ => {}
+    }
+  }
+
+  let package_visitation_result = llvm_lowering_pass.visit_package(&package);
+
+  if package_visitation_result.is_err() {
+    println!("lowering_error: {:?}", package_visitation_result.err());
+
+    return Err(String::from("there are errors; module will not be emitted"));
   }
 
   let llvm_ir = llvm_lowering_pass.llvm_module.print_to_string();
