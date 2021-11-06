@@ -11,7 +11,7 @@ fn find_top_level_node_name(top_level_node: &ionlang::package::TopLevelNode) -> 
   }
 }
 
-fn main() -> Result<(), String> {
+fn main() {
   let matches = App::new("ilc")
     .version("1.0")
     .author("atlx")
@@ -27,7 +27,9 @@ fn main() -> Result<(), String> {
   let file_contents = std::fs::read_to_string(matches.value_of("file").unwrap());
 
   if file_contents.is_err() {
-    return Err(String::from("failed to read file path"));
+    println!("Path does not exist or is inaccessible");
+
+    return;
   }
 
   let mut lexer = ionlang::lexer::Lexer::new(file_contents.unwrap().chars().collect());
@@ -52,9 +54,9 @@ fn main() -> Result<(), String> {
   let package_result = parser.parse_package_decl();
 
   if package_result.is_err() {
-    println!("parse_error: {:?}", package_result.err());
+    println!("@parsing: {}", package_result.err().unwrap());
 
-    return Err(String::from("failed to parse package declaration"));
+    return;
   }
 
   let mut package = package_result.unwrap();
@@ -63,9 +65,9 @@ fn main() -> Result<(), String> {
     let top_level_node_result = parser.parse_top_level_node();
 
     if top_level_node_result.is_err() {
-      println!("parse_error: {:?}", top_level_node_result.err());
+      println!("@parsing: {}", top_level_node_result.err().unwrap());
 
-      return Err(String::from("failed to parse top-level construct"));
+      return;
     }
 
     let top_level_node = top_level_node_result.unwrap();
@@ -85,22 +87,19 @@ fn main() -> Result<(), String> {
 
         if entry_point_check_result.is_err() {
           println!(
-            "entry_point_check_error: {:?}",
-            entry_point_check_result.err()
+            "@entry-point-check: {}",
+            entry_point_check_result.err().unwrap()
           );
 
-          return Err(String::from("failed to check entry point"));
+          return;
         }
 
         let type_check_result = type_check_pass.visit_function(&function);
 
         if type_check_result.is_err() {
-          println!("type_check_error: {:?}", type_check_result.err());
+          println!("@type-check: {}", type_check_result.err().unwrap());
 
-          return Err(format!(
-            "failed to type-check function `{}`",
-            function.prototype.name
-          ));
+          return;
         }
       }
       _ => {}
@@ -110,21 +109,19 @@ fn main() -> Result<(), String> {
   let package_visitation_result = llvm_lowering_pass.visit_package(&package);
 
   if package_visitation_result.is_err() {
-    println!("lowering_error: {:?}", package_visitation_result.err());
+    println!("@lowering: {}", package_visitation_result.err().unwrap());
 
-    return Err(String::from("there are errors; module will not be emitted"));
+    return;
   }
 
   let llvm_ir = llvm_lowering_pass.llvm_module.print_to_string();
 
   println!(
-    "==> LLVM IR: <==\n{}",
+    "===== Resulting LLVM printed below =====\n{}",
     llvm_ir
       .to_str()
       .expect("failed to emit LLVM IR from module")
   );
 
   // pass_manager.run(&parse_result.ok().unwrap());
-
-  Ok(())
 }
