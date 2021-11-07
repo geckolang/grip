@@ -4,10 +4,13 @@ extern crate ionlang;
 use clap::{App, Arg};
 use ionlang::{llvm_lowering_pass, pass::*};
 
-fn find_top_level_node_name(top_level_node: &ionlang::package::TopLevelNode) -> String {
+const ARG_FILE: &str = "file";
+const ARG_LIST_TOKENS: &str = "list-tokens";
+
+fn find_top_level_node_name(top_level_node: &ionlang::node::TopLevelNode) -> String {
   match top_level_node {
-    ionlang::package::TopLevelNode::Function(function) => function.prototype.name.clone(),
-    ionlang::package::TopLevelNode::External(external) => external.prototype.name.clone(),
+    ionlang::node::TopLevelNode::Function(function) => function.prototype.name.clone(),
+    ionlang::node::TopLevelNode::External(external) => external.prototype.name.clone(),
   }
 }
 
@@ -17,17 +20,23 @@ fn main() {
     .author("atlx")
     .about("Command-line interface for ionlang")
     .arg(
-      Arg::with_name("file")
+      Arg::with_name(ARG_FILE)
         .help("The file to process")
         .required(true)
         .index(1),
     )
+    .arg(
+      Arg::with_name(ARG_LIST_TOKENS)
+        .short("t")
+        .long(ARG_LIST_TOKENS)
+        .help("Display a list of the lexed tokens"),
+    )
     .get_matches();
 
-  let file_contents = std::fs::read_to_string(matches.value_of("file").unwrap());
+  let file_contents = std::fs::read_to_string(matches.value_of(ARG_FILE).unwrap());
 
   if file_contents.is_err() {
-    println!("Path does not exist or is inaccessible");
+    println!("path does not exist or is inaccessible");
 
     return;
   }
@@ -48,7 +57,9 @@ fn main() {
 
   let tokens = lexer.collect();
 
-  println!("Tokens: {:?}\n\n", tokens);
+  if matches.is_present(ARG_LIST_TOKENS) {
+    println!("tokens: {:?}\n\n", tokens);
+  }
 
   let mut parser = ionlang::parser::Parser::new(tokens);
   let package_result = parser.parse_package_decl();
@@ -79,30 +90,47 @@ fn main() {
 
   let mut entry_point_check_pass = ionlang::entry_point_check_pass::EntryPointCheckPass {};
   let mut type_check_pass = ionlang::type_check_pass::TypeCheckPass {};
+  let mut diagnostics = vec![];
 
   for top_level_node in package.symbol_table.values() {
     match top_level_node {
-      ionlang::package::TopLevelNode::Function(function) => {
+      ionlang::node::TopLevelNode::Function(function) => {
         let entry_point_check_result = entry_point_check_pass.visit_function(&function);
 
         if entry_point_check_result.is_err() {
-          println!(
-            "@entry-point-check: {}",
-            entry_point_check_result.err().unwrap()
-          );
-
-          return;
+          diagnostics.push(entry_point_check_result.err().unwrap());
         }
 
         let type_check_result = type_check_pass.visit_function(&function);
 
         if type_check_result.is_err() {
-          println!("@type-check: {}", type_check_result.err().unwrap());
-
-          return;
+          diagnostics.push(type_check_result.err().unwrap());
         }
       }
       _ => {}
+    }
+  }
+
+  if !diagnostics.is_empty() {
+    let mut error_count = 0;
+
+    for diagnostic in diagnostics {
+      if diagnostic.severity == ionlang::diagnostic::DiagnosticSeverity::Error
+        || diagnostic.severity == ionlang::diagnostic::DiagnosticSeverity::Internal
+      {
+        error_count += 1;
+      }
+
+      println!("{}", diagnostic);
+    }
+
+    if error_count > 0 {
+      println!(
+        "\n{} error(s) were found; skipping lowering step",
+        error_count
+      );
+
+      return;
     }
   }
 
@@ -121,6 +149,7 @@ fn main() {
     llvm_ir
       .to_str()
       .expect("failed to emit LLVM IR from module")
+      .trim()
   );
 
   // pass_manager.run(&parse_result.ok().unwrap());
