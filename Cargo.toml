@@ -1,12 +1,14 @@
 [package]
-name = "ilc"
+name = "grip"
 version = "0.1.0"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# ionlang = { git = "https://github.com/ionlang/ionlang-rs", branch = "master" }
+# gecko = { git = "https://github.com/ionlang/gecko", branch = "master" }
 clap = "2.33.3"
-ionlang = { path = "../ionlang-rs" }
+gecko = { path = "../gecko" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
+toml = "0.5.8"
+serde = { version = "1.0", features = ["derive"] }
