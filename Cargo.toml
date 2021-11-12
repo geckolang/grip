@@ -15,3 +15,4 @@ gecko = { path = "../gecko" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
 toml = "0.5.8"
 serde = { version = "1.0", features = ["derive"] }
+codespan-reporting = "0.11.1"

@@ -7,15 +7,15 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug executable 'ilc'",
+      "name": "Debug executable 'grip'",
       "cargo": {
         "args": [
           "build",
-          "--bin=ilc",
-          "--package=ilc"
+          "--bin=grip",
+          "--package=grip"
         ],
         "filter": {
-          "name": "ilc",
+          "name": "grip",
           "kind": "bin"
         }
       },
@@ -25,16 +25,16 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug unit tests in executable 'ilc'",
+      "name": "Debug unit tests in executable 'grip'",
       "cargo": {
         "args": [
           "test",
           "--no-run",
-          "--bin=ilc",
-          "--package=ilc"
+          "--bin=grip",
+          "--package=grip"
         ],
         "filter": {
-          "name": "ilc",
+          "name": "grip",
           "kind": "bin"
         }
       },
