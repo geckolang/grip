@@ -1,4 +1,13 @@
-Geckos have super-powers, ya'know? Grip is Gecko's trusty package manager and command-line utility.
+<p align="center">
+  <img alt="Logo" width="200" src="https://i.ibb.co/Sm4L9Mq/Grip-Logo-01.png" />
+  <br/>
+  <br/>
+  <i>Geckos have super-powers, ya'know?</i>
+  <br/>
+  <strong align="center">Grip is Gecko's trusty package manager and command-line utility.</strong>
+</p>
+<br/>
+<hr/>
 
 ```
 USAGE:

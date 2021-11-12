@@ -3,10 +3,13 @@ name = "grip"
 version = "0.1.0"
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+opt-level = "z"  # Optimize for size.
+lto = true  # Enable link-time optimization (possibly reduce binary size).
+codegen-units = 1  # Use a single codegen unit.
 
 [dependencies]
-# gecko = { git = "https://github.com/ionlang/gecko", branch = "master" }
+# TODO: gecko = { git = "https://github.com/ionlang/gecko", branch = "master" }
 clap = "2.33.3"
 gecko = { path = "../gecko" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
