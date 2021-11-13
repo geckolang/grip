@@ -7,7 +7,7 @@
   <strong align="center">Grip is Gecko's trusty package manager and command-line utility.</strong>
   <br/>
   <br/>
-  <img alt="GitHub branch checks state" src="https://img.shields.io/github/checks-status/ionlang/grip/master?style=for-the-badge" />
+  <img alt="GitHub branch checks state" src="https://img.shields.io/github/checks-status/geckolang/grip/master?style=for-the-badge" />
   <img alt="Discord" src="https://img.shields.io/discord/572951207862206474?label=Discord&style=for-the-badge" />
 </p>
 <br/>

@@ -17,10 +17,16 @@ fn find_top_level_node_name(top_level_node: &gecko::node::AnyTopLevelNode) -> St
   }
 }
 
+// TODO: Pass in sub-command matches instead.
 pub fn init_package_manifest(matches: &clap::ArgMatches) {
   let manifest_file_path = std::path::Path::new(PATH_MANIFEST_FILE);
 
-  if manifest_file_path.exists() {
+  if manifest_file_path.exists()
+    && !matches
+      .subcommand_matches(crate::ARG_INIT)
+      .unwrap()
+      .is_present(crate::ARG_INIT_FORCE)
+  {
     log::error!("manifest file already exists in this directory");
 
     return;
@@ -179,7 +185,7 @@ pub fn build_package<'a>(
 
   let manifest_toml = manifest_toml_result.unwrap();
 
-  let source_directory_paths = std::fs::read_dir(
+  let source_directory_paths_result = std::fs::read_dir(
     matches
       .subcommand_matches(crate::ARG_BUILD)
       .unwrap()
@@ -187,52 +193,71 @@ pub fn build_package<'a>(
       .unwrap(),
   );
 
-  if let Err(error) = source_directory_paths {
+  if let Err(error) = source_directory_paths_result {
     log::error!("failed to read sources directory: {}", error);
 
     return None;
   }
 
+  let source_directory_paths = source_directory_paths_result
+    .unwrap()
+    .map(|path_result| path_result.unwrap().path())
+    .filter(|path| {
+      if !path.is_file() {
+        return false;
+      }
+
+      let extension = path.extension();
+
+      extension.is_some() && extension.unwrap() == PATH_SOURCE_FILE_EXTENSION
+    })
+    .collect::<Vec<_>>();
+
   let llvm_module =
-  // TODO: Prefer usage of `.file_prefix()` once it is stable.
-    llvm_context.create_module(manifest_toml.name.as_str());
+      // TODO: Prefer usage of `.file_prefix()` once it is stable.
+      llvm_context.create_module(manifest_toml.name.as_str());
 
-  for path in source_directory_paths.unwrap() {
-    let path = path.unwrap().path();
+  let progress_bar = indicatif::ProgressBar::new(source_directory_paths.len() as u64);
 
-    if path.is_file() {
-      let file_extension = path.extension();
+  progress_bar.set_style(
+    indicatif::ProgressStyle::default_bar()
+      .template("building: {msg} [{bar:30}] {pos}/{len} {elapsed_precise}"),
+  );
 
-      if file_extension.is_none() || file_extension.unwrap() != PATH_SOURCE_FILE_EXTENSION {
-        continue;
-      }
+  for path in source_directory_paths {
+    let source_file_name = path.file_name().unwrap().to_string_lossy();
 
-      log::info!("compiling `{}`", path.display());
+    progress_bar.set_message(format!("{}", source_file_name));
 
-      let source_file_contents_result = fetch_source_file_contents(&path);
+    let source_file_contents_result = fetch_source_file_contents(&path);
 
-      if let Err(error) = source_file_contents_result {
-        log::error!("failed to fetch source file contents: {}", error);
+    if let Err(error) = source_file_contents_result {
+      progress_bar.finish_and_clear();
+      log::error!("failed to fetch source file contents: {}", error);
 
-        return None;
-      }
-
-      let source_file_contents = source_file_contents_result.unwrap();
-
-      // FIXME: Verify that `llvm_module.clone` retains the same module instance.
-      if let Err(diagnostic) =
-        build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches)
-      {
-        // TODO: Should not be called here.
-        crate::print_diagnostic(
-          vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
-          &diagnostic,
-        );
-
-        return None;
-      }
+      return None;
     }
+
+    let source_file_contents = source_file_contents_result.unwrap();
+
+    if let Err(diagnostic) =
+      build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches)
+    {
+      progress_bar.finish_and_clear();
+
+      crate::console::print_diagnostic(
+        vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
+        &diagnostic,
+      );
+
+      return None;
+    }
+
+    progress_bar.inc(1);
   }
+
+  progress_bar.finish_and_clear();
+  log::info!("built package `{}`", manifest_toml.name);
 
   let mut output_file_path = std::path::PathBuf::from(manifest_toml.name.clone());
 

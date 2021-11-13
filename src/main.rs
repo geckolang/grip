@@ -1,3 +1,4 @@
+mod console;
 mod package;
 
 const ARG_FILE: &str = "file";
@@ -8,6 +9,7 @@ const ARG_BUILD_SOURCES_DIR: &str = "sources-dir";
 const ARG_BUILD_OUTPUT_DIR: &str = "output-dir";
 const ARG_INIT: &str = "init";
 const ARG_INIT_NAME: &str = "name";
+const ARG_INIT_FORCE: &str = "force";
 const DEFAULT_SOURCES_DIR: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 
@@ -52,13 +54,30 @@ fn main() {
     .subcommand(
       clap::SubCommand::with_name(ARG_INIT)
         .about("Initialize a default package manifest file in the current directory")
-        .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project")),
+        .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project"))
+        .arg(
+          clap::Arg::with_name(ARG_INIT_FORCE)
+            .help("Reinitialize an existing package manifest file if applicable")
+            .short("f")
+            .long(ARG_INIT_FORCE),
+        ),
     );
 
   // FIXME: Need to implement log crate (it is a facade).
 
   let matches = app.get_matches();
   let llvm_context = inkwell::context::Context::create();
+
+  let set_logger_result = log::set_logger(&console::LOGGER);
+
+  if let Err(error) = set_logger_result {
+    // TODO: Special case.
+    println!("there was an error initializing the logger: {}", error);
+
+    return;
+  }
+
+  log::set_max_level(log::LevelFilter::Info);
 
   if matches.subcommand_matches(ARG_INIT).is_some() {
     package::init_package_manifest(&matches);
@@ -92,8 +111,6 @@ fn main() {
     return;
   }
 
-  log::info!("building single file");
-
   let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
   let llvm_context = inkwell::context::Context::create();
 
@@ -122,7 +139,7 @@ fn main() {
     output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
     write_or_print_output(llvm_module, &output_file_path, &matches);
   } else {
-    print_diagnostic(
+    console::print_diagnostic(
       vec![(
         &source_file_path.clone().to_str().unwrap().to_string(),
         &source_file_contents,
@@ -147,41 +164,4 @@ fn write_or_print_output(
       log::error!("failed to write output file: {}", error);
     }
   }
-}
-
-fn to_codespan_reporting_diagnostic<T>(
-  diagnostic: &gecko::diagnostic::Diagnostic,
-) -> codespan_reporting::diagnostic::Diagnostic<T> {
-  codespan_reporting::diagnostic::Diagnostic::new(match diagnostic.severity {
-    gecko::diagnostic::DiagnosticSeverity::Error => codespan_reporting::diagnostic::Severity::Error,
-    gecko::diagnostic::DiagnosticSeverity::Warning => {
-      codespan_reporting::diagnostic::Severity::Warning
-    }
-    gecko::diagnostic::DiagnosticSeverity::Internal => {
-      codespan_reporting::diagnostic::Severity::Bug
-    }
-  })
-  .with_message(diagnostic.message.clone())
-}
-
-fn print_diagnostic(files: Vec<(&String, &String)>, diagnostic: &gecko::diagnostic::Diagnostic) {
-  let writer = codespan_reporting::term::termcolor::StandardStream::stderr(
-    codespan_reporting::term::termcolor::ColorChoice::Always,
-  );
-
-  let config = codespan_reporting::term::Config::default();
-  let mut codespan_files = codespan_reporting::files::SimpleFiles::new();
-  let codespan_diagnostic = to_codespan_reporting_diagnostic(diagnostic);
-
-  for file in files {
-    codespan_files.add(file.0, file.1);
-  }
-
-  // TODO: Handle possible error.
-  codespan_reporting::term::emit(
-    &mut writer.lock(),
-    &config,
-    &codespan_files,
-    &codespan_diagnostic,
-  );
 }
