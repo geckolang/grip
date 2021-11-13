@@ -1,13 +1,15 @@
-extern crate clap;
-extern crate gecko;
-
 mod package;
 
 const ARG_FILE: &str = "file";
 const ARG_LIST_TOKENS: &str = "list-tokens";
 const ARG_PRINT_LLVM_IR: &str = "print-llvm-ir";
 const ARG_BUILD: &str = "build";
+const ARG_BUILD_SOURCES_DIR: &str = "sources-dir";
+const ARG_BUILD_OUTPUT_DIR: &str = "output-dir";
 const ARG_INIT: &str = "init";
+const ARG_INIT_NAME: &str = "name";
+const DEFAULT_SOURCES_DIR: &str = "src";
+const DEFAULT_OUTPUT_DIR: &str = "build";
 
 fn main() {
   let app = clap::App::new("Grip")
@@ -32,18 +34,34 @@ fn main() {
         .help("Print the resulting LLVM IR instead of producing an output file"),
     )
     .subcommand(
-      clap::SubCommand::with_name(ARG_BUILD).about("Build the project in the current directory"),
+      clap::SubCommand::with_name(ARG_BUILD)
+        .about("Build the project in the current directory")
+        .arg(
+          clap::Arg::with_name(ARG_BUILD_SOURCES_DIR)
+            .short("s")
+            .long(ARG_BUILD_SOURCES_DIR)
+            .default_value(DEFAULT_SOURCES_DIR),
+        )
+        .arg(
+          clap::Arg::with_name(ARG_BUILD_OUTPUT_DIR)
+            .short("o")
+            .long(ARG_BUILD_OUTPUT_DIR)
+            .default_value(DEFAULT_OUTPUT_DIR),
+        ),
     )
     .subcommand(
       clap::SubCommand::with_name(ARG_INIT)
-        .about("Initialize a default package manifest file in the current directory"),
+        .about("Initialize a default package manifest file in the current directory")
+        .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project")),
     );
+
+  // FIXME: Need to implement log crate (it is a facade).
 
   let matches = app.get_matches();
   let llvm_context = inkwell::context::Context::create();
 
   if matches.subcommand_matches(ARG_INIT).is_some() {
-    package::init_package_manifest();
+    package::init_package_manifest(&matches);
 
     return;
   } else if matches.subcommand_matches(ARG_BUILD).is_some() {
@@ -51,10 +69,16 @@ fn main() {
 
     if build_result.is_some() {
       let build_result_tuple = build_result.unwrap();
-      let mut final_output_path = std::path::PathBuf::from(package::PATH_OUTPUT_DIRECTORY);
+
+      let mut final_output_path = std::path::PathBuf::from(
+        matches
+          .subcommand_matches(ARG_BUILD)
+          .unwrap()
+          .value_of(ARG_BUILD_OUTPUT_DIR)
+          .unwrap(),
+      );
 
       final_output_path.push(build_result_tuple.1);
-
       write_or_print_output(build_result_tuple.0, &final_output_path, &matches);
     }
 
@@ -62,51 +86,50 @@ fn main() {
   } else if !matches.is_present(ARG_FILE) {
     // TODO:
     // clap.Error::with_description("no file specified", clap::ErrorKind::MissingArgument);
-    println!("try running --help");
+    log::error!("try running `grip --help`");
     // app.print_long_help();
 
     return;
-  } else {
-    println!("building single file");
+  }
 
-    let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
-    let llvm_context = inkwell::context::Context::create();
+  log::info!("building single file");
 
-    let llvm_module =
+  let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
+  let llvm_context = inkwell::context::Context::create();
+
+  let llvm_module =
       // TODO: Need to verify that `source_file_path` is a file path, otherwise `.file_stem()` might return `None`.
       // TODO: Prefer usage of `.file_prefix()` once it is stable.
       llvm_context.create_module(source_file_path.file_stem().unwrap().to_str().unwrap());
 
-    let source_file_contents_result =
-      package::fetch_source_file_contents(&source_file_path.clone());
+  let source_file_contents_result = package::fetch_source_file_contents(&source_file_path.clone());
 
-    if let Err(error_message) = source_file_contents_result {
-      println!("{}", error_message);
+  if let Err(error) = source_file_contents_result {
+    log::error!("failed to read source file contents: {}", error);
 
-      return;
-    }
+    return;
+  }
 
-    let source_file_contents = source_file_contents_result.unwrap();
+  let source_file_contents = source_file_contents_result.unwrap();
 
-    let build_result =
-      package::build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches);
+  let build_result =
+    package::build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches);
 
-    if build_result.is_ok() {
-      let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
+  if build_result.is_ok() {
+    let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
 
-      output_file_path.push(source_file_path.file_stem().unwrap());
-      output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
-      write_or_print_output(llvm_module, &output_file_path, &matches);
-    } else {
-      print_diagnostic(
-        vec![(
-          &source_file_path.clone().to_str().unwrap().to_string(),
-          &source_file_contents,
-        )],
-        &build_result.err().unwrap(),
-      );
-      // println!("{}", to_codespan_reporting_diagnostic(build_result.err()));
-    }
+    output_file_path.push(source_file_path.file_stem().unwrap());
+    output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
+    write_or_print_output(llvm_module, &output_file_path, &matches);
+  } else {
+    print_diagnostic(
+      vec![(
+        &source_file_path.clone().to_str().unwrap().to_string(),
+        &source_file_contents,
+      )],
+      &build_result.err().unwrap(),
+    );
+    // println!("{}", to_codespan_reporting_diagnostic(build_result.err()));
   }
 }
 
@@ -120,8 +143,8 @@ fn write_or_print_output(
   if matches.is_present(crate::ARG_PRINT_LLVM_IR) {
     println!("{}", llvm_ir);
   } else {
-    if let Err(error_message) = std::fs::write(output_file_path, llvm_ir) {
-      println!("{}", error_message);
+    if let Err(error) = std::fs::write(output_file_path, llvm_ir) {
+      log::error!("failed to write output file: {}", error);
     }
   }
 }

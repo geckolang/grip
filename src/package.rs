@@ -1,14 +1,10 @@
 use gecko::pass::*;
-use serde::{Deserialize, Serialize};
 
 const PATH_MANIFEST_FILE: &str = "grip.toml";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
-// TODO: Use CLI arguments (with default values) for both sources and output directories.
-pub const PATH_SOURCES_DIRECTORY: &str = "src";
-pub const PATH_OUTPUT_DIRECTORY: &str = "build";
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
-#[derive(Serialize, Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct PackageManifest {
   name: String,
   version: String,
@@ -21,30 +17,34 @@ fn find_top_level_node_name(top_level_node: &gecko::node::AnyTopLevelNode) -> St
   }
 }
 
-pub fn init_package_manifest() {
+pub fn init_package_manifest(matches: &clap::ArgMatches) {
   let manifest_file_path = std::path::Path::new(PATH_MANIFEST_FILE);
 
   if manifest_file_path.exists() {
-    println!("manifest file already exists in this directory");
+    log::error!("manifest file already exists in this directory");
 
     return;
   }
 
-  // TODO: Display error.
-  std::fs::create_dir(PATH_SOURCES_DIRECTORY);
-  std::fs::create_dir(PATH_OUTPUT_DIRECTORY);
+  // TODO: Display error if applicable.
+  std::fs::create_dir(crate::DEFAULT_SOURCES_DIR);
+  std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR);
 
   let default_package_manifest = toml::ser::to_string_pretty(&PackageManifest {
-    name: String::from("project"),
+    name: String::from(
+      matches
+        .subcommand_matches(crate::ARG_INIT)
+        .unwrap()
+        .value_of(crate::ARG_INIT_NAME)
+        .unwrap(),
+    ),
     version: String::from("0.0.1"),
   });
 
-  if let Err(error_message) = default_package_manifest {
-    println!("{}", error_message);
-  } else if let Err(error_message) =
-    std::fs::write(manifest_file_path, default_package_manifest.unwrap())
-  {
-    println!("{}", error_message);
+  if let Err(error) = default_package_manifest {
+    log::error!("failed to stringify default package manifest: {}", error);
+  } else if let Err(error) = std::fs::write(manifest_file_path, default_package_manifest.unwrap()) {
+    log::error!("failed to write default package manifest file: {}", error);
   }
 }
 
@@ -163,7 +163,7 @@ pub fn build_package<'a>(
   let manifest_file_contents = std::fs::read_to_string(PATH_MANIFEST_FILE);
 
   if manifest_file_contents.is_err() {
-    println!("path to package manifest does not exist or is inaccessible; run `grip --init` to initialize a default one in the current directory");
+    log::error!("path to package manifest does not exist or is inaccessible; run `grip --init` to initialize a default one in the current directory");
 
     return None;
   }
@@ -171,17 +171,24 @@ pub fn build_package<'a>(
   let manifest_toml_result =
     toml::from_str::<PackageManifest>(manifest_file_contents.unwrap().as_str());
 
-  if manifest_toml_result.is_err() {
-    println!("package manifest is not valid TOML");
+  if let Err(error) = manifest_toml_result {
+    log::error!("failed to parse manifest file: {}", error);
 
     return None;
   }
 
   let manifest_toml = manifest_toml_result.unwrap();
-  let source_directory_paths = std::fs::read_dir(PATH_SOURCES_DIRECTORY);
 
-  if source_directory_paths.is_err() {
-    println!("path to package source files does not exist or is inaccessible");
+  let source_directory_paths = std::fs::read_dir(
+    matches
+      .subcommand_matches(crate::ARG_BUILD)
+      .unwrap()
+      .value_of(crate::ARG_BUILD_SOURCES_DIR)
+      .unwrap(),
+  );
+
+  if let Err(error) = source_directory_paths {
+    log::error!("failed to read sources directory: {}", error);
 
     return None;
   }
@@ -200,12 +207,12 @@ pub fn build_package<'a>(
         continue;
       }
 
-      println!("compiling: {}", path.display());
+      log::info!("compiling `{}`", path.display());
 
       let source_file_contents_result = fetch_source_file_contents(&path);
 
-      if source_file_contents_result.is_err() {
-        println!("{}", source_file_contents_result.err().unwrap());
+      if let Err(error) = source_file_contents_result {
+        log::error!("failed to fetch source file contents: {}", error);
 
         return None;
       }
