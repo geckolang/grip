@@ -9,9 +9,8 @@ lto = true  # Enable link-time optimization (possibly reduce binary size).
 codegen-units = 1  # Use a single codegen unit.
 
 [dependencies]
-# TODO: gecko = { git = "https://github.com/ionlang/gecko", branch = "master" }
+gecko = { git = "https://github.com/geckolang/gecko", branch = "dev" }
 clap = "2.33.3"
-gecko = { path = "../gecko" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
 toml = "0.5.8"
 serde = { version = "1.0", features = ["derive"] }
