@@ -15,7 +15,7 @@
 
 ```
 USAGE:
-    grip.exe [FLAGS] [file] [SUBCOMMAND]
+    grip [FLAGS] [file] [SUBCOMMAND]
 
 FLAGS:
     -h, --help             Prints help information
