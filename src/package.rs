@@ -51,6 +51,15 @@ pub fn init_package_manifest(matches: &clap::ArgMatches) {
     log::error!("failed to stringify default package manifest: {}", error);
   } else if let Err(error) = std::fs::write(manifest_file_path, default_package_manifest.unwrap()) {
     log::error!("failed to write default package manifest file: {}", error);
+  } else if let Err(error) = std::fs::write(
+    std::path::PathBuf::from(".gitignore"),
+    format!(
+      "{}/\n{}/",
+      crate::DEFAULT_OUTPUT_DIR,
+      crate::PATH_DEPENDENCIES
+    ),
+  ) {
+    log::error!("failed to write `.gitignore` file: {}", error);
   }
 }
 
