@@ -14,7 +14,8 @@ const ARG_INIT: &str = "init";
 const ARG_INIT_NAME: &str = "name";
 const ARG_INIT_FORCE: &str = "force";
 const ARG_INSTALL: &str = "install";
-const ARG_INSTALL_URL: &str = "url";
+const ARG_INSTALL_PATH: &str = "url";
+const ARG_INSTALL_BRANCH: &str = "custom-source";
 const DEFAULT_SOURCES_DIR: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
@@ -72,8 +73,15 @@ async fn main() {
     )
     .subcommand(
       clap::SubCommand::with_name(ARG_INSTALL)
-        .about("Install a package")
-        .arg(clap::Arg::with_name(ARG_INSTALL_URL).index(1)),
+        .about("Install a package from a GitHub repository")
+        .arg(clap::Arg::with_name(ARG_INSTALL_PATH).index(1))
+        .arg(
+          clap::Arg::with_name(ARG_INSTALL_BRANCH)
+            .help("The branch to use")
+            .short("b")
+            .long(ARG_INSTALL_BRANCH)
+            .default_value("master"),
+        ),
     );
 
   // FIXME: Need to implement log crate (it is a facade).
@@ -116,9 +124,21 @@ async fn main() {
     // TODO: Might need a client for subsequent dependencies of the installed package.
     let reqwest_client = reqwest::Client::new();
 
+    // TODO: Load/verify the `grip.toml` file then go from there (parse it as TOML directly).
+    // format!(
+    //   "https://raw.githubusercontent.com/{}/master/package.toml",
+    //   install_arg_matches.value_of(ARG_INSTALL_URL).unwrap()
+    // )
+
+    let url = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
+    let branch = install_arg_matches.value_of(ARG_INSTALL_BRANCH).unwrap();
+
     let response = {
       let response_result = reqwest_client
-        .get(install_arg_matches.value_of(ARG_INSTALL_URL).unwrap())
+        .get(format!(
+          "https://codeload.github.com/{}/zip/refs/heads/{}",
+          url, branch
+        ))
         .send()
         .await;
 
@@ -143,6 +163,7 @@ async fn main() {
     let file_size = {
       let content_length = response.content_length();
 
+      // FIXME: Getting fragile `failed to download the package: no content length` errors.
       if content_length.is_none() {
         log::error!("failed to download the package: no content length");
 
@@ -161,7 +182,7 @@ async fn main() {
     progress_bar.set_message(
       // TODO: Use package name instead of install url.
       install_arg_matches
-        .value_of(ARG_INSTALL_URL)
+        .value_of(ARG_INSTALL_PATH)
         .unwrap()
         .to_string(),
     );
@@ -181,6 +202,8 @@ async fn main() {
       let file_result = std::fs::File::create(file_path);
 
       if let Err(error) = file_result {
+        progress_bar.finish_and_clear();
+
         log::error!(
           "failed to create output file for package download: {}",
           error
@@ -197,6 +220,7 @@ async fn main() {
 
     while let Some(chunk_result) = bytes_stream.next().await {
       if let Err(error) = chunk_result {
+        progress_bar.finish_and_clear();
         log::error!("failed to download the package: {}", error);
 
         return;
@@ -205,6 +229,7 @@ async fn main() {
       let chunk = chunk_result.unwrap();
 
       if let Err(error) = file.write(&chunk) {
+        progress_bar.finish_and_clear();
         log::error!("failed to write to output file: {}", error);
 
         return;
