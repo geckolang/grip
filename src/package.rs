@@ -1,13 +1,13 @@
 use gecko::pass::*;
 
-const PATH_MANIFEST_FILE: &str = "grip.toml";
+pub const PATH_MANIFEST_FILE: &str = "grip.toml";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct PackageManifest {
-  name: String,
-  version: String,
+pub struct PackageManifest {
+  pub name: String,
+  pub version: String,
 }
 
 fn find_top_level_node_name(top_level_node: &gecko::node::AnyTopLevelNode) -> String {

@@ -130,14 +130,65 @@ async fn main() {
     //   install_arg_matches.value_of(ARG_INSTALL_URL).unwrap()
     // )
 
-    let url = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
+    let github_path = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
     let branch = install_arg_matches.value_of(ARG_INSTALL_BRANCH).unwrap();
 
-    let response = {
+    // TODO: GitHub might be caching results from this url.
+    let package_manifest_file_response_result = reqwest_client
+      .get(format!(
+        "https://raw.githubusercontent.com/{}/{}/{}",
+        github_path,
+        branch,
+        package::PATH_MANIFEST_FILE
+      ))
+      .send()
+      .await;
+
+    if let Err(error) = package_manifest_file_response_result {
+      log::error!("failed to fetching the package manifest file: {}", error);
+
+      return;
+    }
+
+    let package_manifest_file_response = package_manifest_file_response_result.unwrap();
+
+    if package_manifest_file_response.status() == reqwest::StatusCode::NOT_FOUND {
+      log::error!("the package manifest file was not found on the requested repository");
+
+      return;
+    } else if !package_manifest_file_response.status().is_success() {
+      log::error!(
+        "failed to fetching the package manifest file: HTTP error {}",
+        package_manifest_file_response.status()
+      );
+
+      return;
+    }
+
+    let package_manifest_file_text = package_manifest_file_response.text().await;
+
+    if let Err(error) = package_manifest_file_text {
+      log::error!("failed to fetching the package manifest file: {}", error);
+
+      return;
+    }
+
+    let package_manifest_result =
+      toml::from_str::<package::PackageManifest>(package_manifest_file_text.unwrap().as_str());
+
+    if let Err(error) = package_manifest_result {
+      log::error!("failed to parse the package manifest file: {}", error);
+
+      return;
+    }
+
+    let package_manifest = package_manifest_result.unwrap();
+
+    let package_zip_file_response = {
       let response_result = reqwest_client
         .get(format!(
           "https://codeload.github.com/{}/zip/refs/heads/{}",
-          url, branch
+          github_path, branch
         ))
         .send()
         .await;
@@ -151,17 +202,17 @@ async fn main() {
       response_result.unwrap()
     };
 
-    if !response.status().is_success() {
+    if !package_zip_file_response.status().is_success() {
       log::error!(
         "failed to download the package: HTTP error {}",
-        response.status()
+        package_zip_file_response.status()
       );
 
       return;
     }
 
     let file_size = {
-      let content_length = response.content_length();
+      let content_length = package_zip_file_response.content_length();
 
       // FIXME: Getting fragile `failed to download the package: no content length` errors.
       if content_length.is_none() {
@@ -179,13 +230,7 @@ async fn main() {
       "downloading package: {msg} [{bar:30}] {bytes}/{total_bytes} {bytes_per_sec}, {eta}",
     ));
 
-    progress_bar.set_message(
-      // TODO: Use package name instead of install url.
-      install_arg_matches
-        .value_of(ARG_INSTALL_PATH)
-        .unwrap()
-        .to_string(),
-    );
+    progress_bar.set_message(package_manifest.name.clone());
 
     let mut file_path = std::path::PathBuf::from(PATH_DEPENDENCIES);
 
@@ -195,8 +240,7 @@ async fn main() {
       std::fs::create_dir_all(file_path.clone());
     }
 
-    // FIXME: Temporary.
-    file_path.push("my-dep.zip");
+    file_path.push(format!("{}.zip", package_manifest.name));
 
     let mut file = {
       let file_result = std::fs::File::create(file_path);
@@ -216,7 +260,7 @@ async fn main() {
     };
 
     let mut downloaded_bytes: u64 = 0;
-    let mut bytes_stream = response.bytes_stream();
+    let mut bytes_stream = package_zip_file_response.bytes_stream();
 
     while let Some(chunk_result) = bytes_stream.next().await {
       if let Err(error) = chunk_result {
@@ -242,9 +286,7 @@ async fn main() {
     }
 
     progress_bar.finish_and_clear();
-
-    // TODO: Use package name.
-    log::info!("downloaded package `{}`", "foo");
+    log::info!("downloaded package `{}`", package_manifest.name);
   } else if matches.is_present(ARG_FILE) {
     let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
     let llvm_context = inkwell::context::Context::create();
