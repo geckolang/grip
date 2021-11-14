@@ -121,15 +121,7 @@ async fn main() {
       write_or_print_output(build_result_tuple.0, &final_output_path, &matches);
     }
   } else if let Some(install_arg_matches) = matches.subcommand_matches(ARG_INSTALL) {
-    // TODO: Might need a client for subsequent dependencies of the installed package.
     let reqwest_client = reqwest::Client::new();
-
-    // TODO: Load/verify the `grip.toml` file then go from there (parse it as TOML directly).
-    // format!(
-    //   "https://raw.githubusercontent.com/{}/master/package.toml",
-    //   install_arg_matches.value_of(ARG_INSTALL_URL).unwrap()
-    // )
-
     let github_path = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
     let branch = install_arg_matches.value_of(ARG_INSTALL_BRANCH).unwrap();
 
