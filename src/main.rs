@@ -14,8 +14,8 @@ const ARG_INIT: &str = "init";
 const ARG_INIT_NAME: &str = "name";
 const ARG_INIT_FORCE: &str = "force";
 const ARG_INSTALL: &str = "install";
-const ARG_INSTALL_PATH: &str = "url";
-const ARG_INSTALL_BRANCH: &str = "custom-source";
+const ARG_INSTALL_PATH: &str = "repository-path";
+const ARG_INSTALL_BRANCH: &str = "branch";
 const DEFAULT_SOURCES_DIR: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
@@ -74,10 +74,14 @@ async fn main() {
     .subcommand(
       clap::SubCommand::with_name(ARG_INSTALL)
         .about("Install a package from a GitHub repository")
-        .arg(clap::Arg::with_name(ARG_INSTALL_PATH).index(1))
+        .arg(
+          clap::Arg::with_name(ARG_INSTALL_PATH)
+            .index(1)
+            .help("The GitHub repository path where the package lives, in the following format: `user/repository` or `organization/repository`"),
+        )
         .arg(
           clap::Arg::with_name(ARG_INSTALL_BRANCH)
-            .help("The branch to use")
+            .help("The GitHub repository's branch to use")
             .short("b")
             .long(ARG_INSTALL_BRANCH)
             .default_value("master"),
@@ -122,15 +126,15 @@ async fn main() {
     }
   } else if let Some(install_arg_matches) = matches.subcommand_matches(ARG_INSTALL) {
     let reqwest_client = reqwest::Client::new();
-    let github_path = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
-    let branch = install_arg_matches.value_of(ARG_INSTALL_BRANCH).unwrap();
+    let github_repository_path = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
+    let github_branch = install_arg_matches.value_of(ARG_INSTALL_BRANCH).unwrap();
 
     // TODO: GitHub might be caching results from this url.
     let package_manifest_file_response_result = reqwest_client
       .get(format!(
         "https://raw.githubusercontent.com/{}/{}/{}",
-        github_path,
-        branch,
+        github_repository_path,
+        github_branch,
         package::PATH_MANIFEST_FILE
       ))
       .send()
@@ -180,7 +184,7 @@ async fn main() {
       let response_result = reqwest_client
         .get(format!(
           "https://codeload.github.com/{}/zip/refs/heads/{}",
-          github_path, branch
+          github_repository_path, github_branch
         ))
         .send()
         .await;

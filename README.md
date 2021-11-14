@@ -27,7 +27,8 @@ ARGS:
     <file>    The file to process
 
 SUBCOMMANDS:
-    build    Build the project in the current directory
-    help     Prints this message or the help of the given subcommand(s)
-    init     Initialize a default package manifest file in the current directory
+    build      Build the project in the current directory
+    help       Prints this message or the help of the given subcommand(s)
+    init       Initialize a default package manifest file in the current directory
+    install    Install a package from a GitHub repository
 ```
