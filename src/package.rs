@@ -104,7 +104,32 @@ pub fn build_single_file<'ctx>(
     return Err(vec![diagnostic]);
   }
 
-  let mut module_decl = module_decl_result.unwrap();
+  let module_decl = module_decl_result.unwrap();
+  let mut diagnostics = Vec::new();
+
+  let mut top_level_nodes = vec![gecko::pass_manager::TopLevelNodeTransport::Module(
+    module_decl,
+  )];
+
+  while !parser.is_eof() {
+    let top_level_node = parser.parse_top_level_node();
+
+    if let Err(diagnostic) = top_level_node {
+      diagnostics.push(diagnostic);
+
+      continue;
+    }
+
+    top_level_nodes.push(match top_level_node.unwrap() {
+      gecko::node::TopLevelNodeHolder::Function(function) => {
+        gecko::pass_manager::TopLevelNodeTransport::Function(function)
+      }
+      gecko::node::TopLevelNodeHolder::External(external) => {
+        gecko::pass_manager::TopLevelNodeTransport::External(external)
+      }
+    });
+  }
+
   let mut name_resolution_pass = gecko::name_resolution_pass::NameResolutionPass::new();
   let mut type_check_pass = gecko::type_check_pass::TypeCheckPass;
   let mut entry_point_check_pass = gecko::entry_point_check_pass::EntryPointCheckPass {};
@@ -117,8 +142,7 @@ pub fn build_single_file<'ctx>(
   pass_manager.add_pass(&mut type_check_pass);
   pass_manager.add_pass(&mut entry_point_check_pass);
   pass_manager.add_pass(&mut llvm_lowering_pass);
-
-  let diagnostics = pass_manager.run(&mut module_decl);
+  diagnostics.extend(pass_manager.run(&top_level_nodes));
 
   return if diagnostics.is_empty() {
     Ok(())
