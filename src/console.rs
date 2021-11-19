@@ -3,11 +3,11 @@ pub struct Logger;
 pub static LOGGER: Logger = Logger;
 
 impl log::Log for Logger {
-  fn enabled(&self, metadata: &log::Metadata) -> bool {
+  fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
     metadata.level() <= log::Level::Info
   }
 
-  fn log(&self, record: &log::Record) {
+  fn log(&self, record: &log::Record<'_>) {
     if self.enabled(record.metadata()) {
       // TODO: Use lighter colors.
 
@@ -31,21 +31,6 @@ impl log::Log for Logger {
   }
 }
 
-fn to_codespan_reporting_diagnostic<T>(
-  diagnostic: &gecko::diagnostic::Diagnostic,
-) -> codespan_reporting::diagnostic::Diagnostic<T> {
-  codespan_reporting::diagnostic::Diagnostic::new(match diagnostic.severity {
-    gecko::diagnostic::DiagnosticSeverity::Error => codespan_reporting::diagnostic::Severity::Error,
-    gecko::diagnostic::DiagnosticSeverity::Warning => {
-      codespan_reporting::diagnostic::Severity::Warning
-    }
-    gecko::diagnostic::DiagnosticSeverity::Internal => {
-      codespan_reporting::diagnostic::Severity::Bug
-    }
-  })
-  .with_message(diagnostic.message.clone())
-}
-
 pub fn print_diagnostic(
   files: Vec<(&String, &String)>,
   diagnostic: &gecko::diagnostic::Diagnostic,
@@ -56,7 +41,20 @@ pub fn print_diagnostic(
 
   let config = codespan_reporting::term::Config::default();
   let mut codespan_files = codespan_reporting::files::SimpleFiles::new();
-  let codespan_diagnostic = to_codespan_reporting_diagnostic(diagnostic);
+
+  let mut codespan_diagnostic =
+    codespan_reporting::diagnostic::Diagnostic::new(match diagnostic.severity {
+      gecko::diagnostic::Severity::Error => codespan_reporting::diagnostic::Severity::Error,
+      gecko::diagnostic::Severity::Warning => codespan_reporting::diagnostic::Severity::Warning,
+      gecko::diagnostic::Severity::Internal => codespan_reporting::diagnostic::Severity::Bug,
+    })
+    .with_message(diagnostic.message.clone());
+
+  if diagnostic.severity == gecko::diagnostic::Severity::Internal {
+    codespan_diagnostic
+      .notes
+      .push("please report this to the compiler team".into());
+  }
 
   for file in files {
     codespan_files.add(file.0, file.1);

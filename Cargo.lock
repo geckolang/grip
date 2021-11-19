@@ -259,7 +259,6 @@ dependencies = [
 [[package]]
 name = "gecko"
 version = "0.1.0"
-source = "git+https://github.com/geckolang/gecko?branch=dev#3f2ef6c18c64040fcf023c37d1ea1bdaa78d25ad"
 dependencies = [
  "colored",
  "inkwell",

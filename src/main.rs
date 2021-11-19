@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use futures_util::StreamExt;
 use std::io::Write;
 
@@ -87,8 +89,6 @@ async fn main() {
             .default_value("master"),
         ),
     );
-
-  // FIXME: Need to implement log crate (it is a facade).
 
   let matches = app.get_matches();
   let llvm_context = inkwell::context::Context::create();
@@ -306,22 +306,25 @@ async fn main() {
     let build_result =
       package::build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches);
 
-    if build_result.is_ok() {
-      let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
+    if let Err(diagnostics) = build_result {
+      for diagnostic in diagnostics {
+        console::print_diagnostic(
+          vec![(
+            &source_file_path.clone().to_str().unwrap().to_string(),
+            &source_file_contents,
+          )],
+          &diagnostic,
+        );
+      }
 
-      output_file_path.push(source_file_path.file_stem().unwrap());
-      output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
-      write_or_print_output(llvm_module, &output_file_path, &matches);
-    } else {
-      console::print_diagnostic(
-        vec![(
-          &source_file_path.clone().to_str().unwrap().to_string(),
-          &source_file_contents,
-        )],
-        &build_result.err().unwrap(),
-      );
-      // println!("{}", to_codespan_reporting_diagnostic(build_result.err()));
+      return;
     }
+
+    let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
+
+    output_file_path.push(source_file_path.file_stem().unwrap());
+    output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
+    write_or_print_output(llvm_module, &output_file_path, &matches);
   } else {
     // TODO:
     // clap.Error::with_description("no file specified", clap::ErrorKind::MissingArgument);
@@ -331,9 +334,9 @@ async fn main() {
 }
 
 fn write_or_print_output(
-  llvm_module: inkwell::module::Module,
+  llvm_module: inkwell::module::Module<'_>,
   output_file_path: &std::path::PathBuf,
-  matches: &clap::ArgMatches,
+  matches: &clap::ArgMatches<'_>,
 ) {
   let llvm_ir = llvm_module.print_to_string().to_string();
 

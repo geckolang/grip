@@ -1,5 +1,3 @@
-use gecko::pass::*;
-
 pub const PATH_MANIFEST_FILE: &str = "grip.toml";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
@@ -10,15 +8,15 @@ pub struct PackageManifest {
   pub version: String,
 }
 
-fn find_top_level_node_name(top_level_node: &gecko::node::AnyTopLevelNode) -> String {
+fn find_top_level_node_name(top_level_node: &gecko::node::TopLevelNodeHolder<'_>) -> String {
   match top_level_node {
-    gecko::node::AnyTopLevelNode::Function(function) => function.prototype.name.clone(),
-    gecko::node::AnyTopLevelNode::External(external) => external.prototype.name.clone(),
+    gecko::node::TopLevelNodeHolder::Function(function) => function.prototype.name.clone(),
+    gecko::node::TopLevelNodeHolder::External(external) => external.prototype.name.clone(),
   }
 }
 
 // TODO: Pass in sub-command matches instead.
-pub fn init_package_manifest(matches: &clap::ArgMatches) {
+pub fn init_package_manifest(matches: &clap::ArgMatches<'_>) {
   let manifest_file_path = std::path::Path::new(PATH_MANIFEST_FILE);
 
   if manifest_file_path.exists()
@@ -66,114 +64,72 @@ pub fn init_package_manifest(matches: &clap::ArgMatches) {
 pub fn fetch_source_file_contents(source_file_path: &std::path::PathBuf) -> Result<String, String> {
   if !source_file_path.is_file() {
     return Err(String::from(
-      "provided build path is not a file or is inaccessible",
+      "path does not exist, is not a file, or is inaccessible",
     ));
   }
 
   let source_file_contents = std::fs::read_to_string(source_file_path.clone());
 
   if source_file_contents.is_err() {
-    return Err(String::from("path does not exist or is inaccessible"));
+    return Err(String::from(
+      "path does not exist or its contents are not valid UTF-8",
+    ));
   }
 
   Ok(source_file_contents.unwrap())
 }
 
 // TODO: Consider returning a `Vec<diagnostic::Diagnostic>` containing the actual problem(s) encountered.
-pub fn build_single_file<'a>(
-  llvm_context: &'a inkwell::context::Context,
-  llvm_module: &inkwell::module::Module<'a>,
+pub fn build_single_file<'ctx>(
+  llvm_context: &'ctx inkwell::context::Context,
+  llvm_module: &inkwell::module::Module<'ctx>,
   source_file_contents: &String,
-  matches: &clap::ArgMatches,
-) -> Result<(), gecko::diagnostic::Diagnostic> {
+  matches: &clap::ArgMatches<'_>,
+) -> Result<(), Vec<gecko::diagnostic::Diagnostic>> {
   let mut lexer = gecko::lexer::Lexer::new(source_file_contents.chars().collect());
-
-  // let mut pass_manager = gecko::pass_manager::PassManager::new();
-
-  let mut llvm_lowering_pass =
-    gecko::llvm_lowering_pass::LlvmLoweringPass::new(&llvm_context, llvm_module);
-
-  // pass_manager.add_pass(Box::new(llvm_lowering_pass));
 
   lexer.read_char();
 
   let tokens = lexer.collect();
 
   if matches.is_present(crate::ARG_LIST_TOKENS) {
+    // TODO: Better printing
     println!("tokens: {:?}\n\n", tokens);
   }
 
   let mut parser = gecko::parser::Parser::new(tokens);
-  let mut module = parser.parse_module_decl()?;
-  let mut type_check_pass = gecko::type_check_pass::TypeCheckPass;
+  let module_decl_result = parser.parse_module_decl();
 
-  while !parser.is_eof() {
-    let top_level_node = parser.parse_top_level_node()?;
-
-    match &top_level_node {
-      gecko::node::AnyTopLevelNode::Function(function) => type_check_pass.visit_function(&function),
-      _ => Ok(()),
-    }?;
-
-    module
-      .symbol_table
-      .insert(find_top_level_node_name(&top_level_node), top_level_node);
+  if let Err(diagnostic) = module_decl_result {
+    return Err(vec![diagnostic]);
   }
 
+  let mut module_decl = module_decl_result.unwrap();
+  let mut name_resolution_pass = gecko::name_resolution_pass::NameResolutionPass::new();
+  let mut type_check_pass = gecko::type_check_pass::TypeCheckPass;
   let mut entry_point_check_pass = gecko::entry_point_check_pass::EntryPointCheckPass {};
-  // TODO:
-  // let mut diagnostics = vec![];
+  let mut pass_manager = gecko::pass_manager::PassManager::new();
 
-  // for top_level_node in module.symbol_table.values() {
-  //   match top_level_node {
-  //     gecko::node::AnyTopLevelNode::Function(function) => {
-  //       let entry_point_check_result = entry_point_check_pass.visit_function(&function);
+  let mut llvm_lowering_pass =
+    gecko::llvm_lowering_pass::LlvmLoweringPass::new(&llvm_context, llvm_module);
 
-  //       if entry_point_check_result.is_err() {
-  //         diagnostics.push(entry_point_check_result.err().unwrap());
-  //       }
+  pass_manager.add_pass(&mut name_resolution_pass);
+  pass_manager.add_pass(&mut type_check_pass);
+  pass_manager.add_pass(&mut entry_point_check_pass);
+  pass_manager.add_pass(&mut llvm_lowering_pass);
 
-  //       let type_check_result = type_check_pass.visit_function(&function);
+  let diagnostics = pass_manager.run(&mut module_decl);
 
-  //       if type_check_result.is_err() {
-  //         diagnostics.push(type_check_result.err().unwrap());
-  //       }
-  //     }
-  //     _ => {}
-  //   }
-  // }
-
-  // if !diagnostics.is_empty() {
-  //   let mut error_count = 0;
-
-  //   for diagnostic in diagnostics {
-  //     if diagnostic.severity == gecko::diagnostic::DiagnosticSeverity::Error
-  //       || diagnostic.severity == gecko::diagnostic::DiagnosticSeverity::Internal
-  //     {
-  //       error_count += 1;
-  //     }
-
-  //     println!("{}", diagnostic);
-  //   }
-
-  //   if error_count > 0 {
-  //     println!(
-  //       "\n{} error(s) were found; skipping lowering step",
-  //       error_count
-  //     );
-
-  //     return false;
-  //   }
-  // }
-
-  llvm_lowering_pass.visit_module(&module)
-
-  // pass_manager.run(&parse_result.ok().unwrap());
+  return if diagnostics.is_empty() {
+    Ok(())
+  } else {
+    Err(diagnostics)
+  };
 }
 
 pub fn build_package<'a>(
   llvm_context: &'a inkwell::context::Context,
-  matches: &clap::ArgMatches,
+  matches: &clap::ArgMatches<'_>,
 ) -> Option<(inkwell::module::Module<'a>, std::path::PathBuf)> {
   let manifest_file_contents = std::fs::read_to_string(PATH_MANIFEST_FILE);
 
@@ -249,15 +205,17 @@ pub fn build_package<'a>(
 
     let source_file_contents = source_file_contents_result.unwrap();
 
-    if let Err(diagnostic) =
+    if let Err(diagnostics) =
       build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches)
     {
       progress_bar.finish_and_clear();
 
-      crate::console::print_diagnostic(
-        vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
-        &diagnostic,
-      );
+      for diagnostic in diagnostics {
+        crate::console::print_diagnostic(
+          vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
+          &diagnostic,
+        );
+      }
 
       return None;
     }
