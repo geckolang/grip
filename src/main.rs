@@ -18,6 +18,7 @@ const ARG_INIT_FORCE: &str = "force";
 const ARG_INSTALL: &str = "install";
 const ARG_INSTALL_PATH: &str = "repository-path";
 const ARG_INSTALL_BRANCH: &str = "branch";
+const ARG_CHECK: &str = "check";
 const DEFAULT_SOURCES_DIR: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
@@ -88,7 +89,7 @@ async fn main() {
             .long(ARG_INSTALL_BRANCH)
             .default_value("master"),
         ),
-    );
+    ).subcommand(clap::SubCommand::with_name(ARG_CHECK).about("Perform type-checking only upon the project"));
 
   let matches = app.get_matches();
   let llvm_context = inkwell::context::Context::create();
@@ -103,11 +104,13 @@ async fn main() {
 
   log::set_max_level(log::LevelFilter::Info);
 
-  if matches.subcommand_matches(ARG_INIT).is_some() {
+  if let Some(init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
+    // TODO: Pass in & process `init_arg_matches` instead of `matches`.
     package::init_package_manifest(&matches);
 
     return;
-  } else if matches.subcommand_matches(ARG_BUILD).is_some() {
+  } else if let Some(build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
+    // TODO: Pass in & process `build_arg_matches` instead of `matches`.
     let build_result = package::build_package(&llvm_context, &matches);
 
     if build_result.is_some() {
@@ -283,6 +286,9 @@ async fn main() {
 
     progress_bar.finish_and_clear();
     log::info!("downloaded package `{}`", package_manifest.name);
+  } else if let Some(check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
+    // TODO: Implement.
+    todo!();
   } else if matches.is_present(ARG_FILE) {
     let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
     let llvm_context = inkwell::context::Context::create();

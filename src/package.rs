@@ -8,15 +8,9 @@ pub struct PackageManifest {
   pub version: String,
 }
 
-fn find_top_level_node_name(top_level_node: &gecko::node::TopLevelNodeHolder<'_>) -> String {
-  match top_level_node {
-    gecko::node::TopLevelNodeHolder::Function(function) => function.prototype.name.clone(),
-    gecko::node::TopLevelNodeHolder::External(external) => external.prototype.name.clone(),
-  }
-}
-
+// TODO: Make use of return value.
 // TODO: Pass in sub-command matches instead.
-pub fn init_package_manifest(matches: &clap::ArgMatches<'_>) {
+pub fn init_package_manifest(matches: &clap::ArgMatches<'_>) -> bool {
   let manifest_file_path = std::path::Path::new(PATH_MANIFEST_FILE);
 
   if manifest_file_path.exists()
@@ -27,12 +21,18 @@ pub fn init_package_manifest(matches: &clap::ArgMatches<'_>) {
   {
     log::error!("manifest file already exists in this directory");
 
-    return;
+    return false;
   }
 
-  // TODO: Display error if applicable.
-  std::fs::create_dir(crate::DEFAULT_SOURCES_DIR);
-  std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR);
+  if std::fs::create_dir(crate::DEFAULT_SOURCES_DIR).is_err() {
+    log::error!("failed to create sources directory");
+
+    return false;
+  } else if std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR).is_err() {
+    log::error!("failed to create output directory");
+
+    return false;
+  }
 
   let default_package_manifest = toml::ser::to_string_pretty(&PackageManifest {
     name: String::from(
@@ -47,8 +47,12 @@ pub fn init_package_manifest(matches: &clap::ArgMatches<'_>) {
 
   if let Err(error) = default_package_manifest {
     log::error!("failed to stringify default package manifest: {}", error);
+
+    return false;
   } else if let Err(error) = std::fs::write(manifest_file_path, default_package_manifest.unwrap()) {
     log::error!("failed to write default package manifest file: {}", error);
+
+    return false;
   } else if let Err(error) = std::fs::write(
     std::path::PathBuf::from(".gitignore"),
     format!(
@@ -58,7 +62,11 @@ pub fn init_package_manifest(matches: &clap::ArgMatches<'_>) {
     ),
   ) {
     log::error!("failed to write `.gitignore` file: {}", error);
+
+    return false;
   }
+
+  true
 }
 
 pub fn fetch_source_file_contents(source_file_path: &std::path::PathBuf) -> Result<String, String> {
@@ -115,7 +123,15 @@ pub fn build_single_file<'ctx>(
     let top_level_node = parser.parse_top_level_node();
 
     if let Err(diagnostic) = top_level_node {
-      diagnostics.push(diagnostic);
+      // TODO: Cloning diagnostic. Is this okay?
+      diagnostics.push(diagnostic.clone());
+
+      // NOTE: Parsing must stop here because the parser's index will
+      // not be updated upon parse errors (it will remain the same),
+      // thus making an infinite loop.
+      if diagnostic.is_error_like() {
+        break;
+      }
 
       continue;
     }
@@ -132,7 +148,7 @@ pub fn build_single_file<'ctx>(
 
   let mut name_resolution_pass = gecko::name_resolution_pass::NameResolutionPass::new();
   let mut type_check_pass = gecko::type_check_pass::TypeCheckPass;
-  let mut entry_point_check_pass = gecko::entry_point_check_pass::EntryPointCheckPass {};
+  let mut entry_point_check_pass = gecko::entry_point_check_pass::EntryPointCheckPass::new();
   let mut pass_manager = gecko::pass_manager::PassManager::new();
 
   let mut llvm_lowering_pass =
@@ -142,8 +158,10 @@ pub fn build_single_file<'ctx>(
   pass_manager.add_pass(&mut type_check_pass);
   pass_manager.add_pass(&mut entry_point_check_pass);
   pass_manager.add_pass(&mut llvm_lowering_pass);
+  // FIXME: For some reason it appears that all passes are being run by the amount of functions present on a single file (or it might actually be that the diagnostics are shown multiple times).
   diagnostics.extend(pass_manager.run(&top_level_nodes));
 
+  // TODO: Diagnostics vector may only contain non-error diagnostics. What if that's the case?
   return if diagnostics.is_empty() {
     Ok(())
   } else {
@@ -232,23 +250,44 @@ pub fn build_package<'a>(
     if let Err(diagnostics) =
       build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches)
     {
-      progress_bar.finish_and_clear();
+      let mut error_encountered = false;
 
       for diagnostic in diagnostics {
+        // TODO: Maybe fix this by clearing then re-writing the progress bar.
+        // FIXME: This will interfere with the progress bar (leave it behind).
         crate::console::print_diagnostic(
           vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
           &diagnostic,
         );
+
+        if diagnostic.is_error_like() {
+          error_encountered = true;
+        }
       }
 
-      return None;
+      if error_encountered {
+        // TODO: Maybe fix this by clearing then re-writing the progress bar.
+        // FIXME: This will interfere with the progress bar (leave it behind).
+        log::error!(
+          "failed to build package `{}` due to previous error(s)",
+          manifest_toml.name
+        );
+
+        return None;
+      }
     }
 
     progress_bar.inc(1);
   }
 
   progress_bar.finish_and_clear();
-  log::info!("built package `{}`", manifest_toml.name);
+
+  // TODO: In the future, use the appropriate time unit (min, sec, etc.) instead of just `s`.
+  log::info!(
+    "built package `{}` in {}s",
+    manifest_toml.name,
+    progress_bar.elapsed().as_secs()
+  );
 
   let mut output_file_path = std::path::PathBuf::from(manifest_toml.name.clone());
 
