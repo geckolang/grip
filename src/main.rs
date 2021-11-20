@@ -104,12 +104,12 @@ async fn main() {
 
   log::set_max_level(log::LevelFilter::Info);
 
-  if let Some(init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
+  if let Some(_init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
     // TODO: Pass in & process `init_arg_matches` instead of `matches`.
     package::init_package_manifest(&matches);
 
     return;
-  } else if let Some(build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
+  } else if let Some(_build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
     // TODO: Pass in & process `build_arg_matches` instead of `matches`.
     let build_result = package::build_package(&llvm_context, &matches);
 
@@ -236,7 +236,11 @@ async fn main() {
     file_path.push(".downloading");
 
     if !file_path.exists() {
-      std::fs::create_dir_all(file_path.clone());
+      if let Err(error) = std::fs::create_dir_all(file_path.clone()) {
+        log::error!("failed to create the dependencies directory: {}", error);
+
+        return;
+      }
     }
 
     file_path.push(format!("{}.zip", package_manifest.name));
@@ -286,7 +290,9 @@ async fn main() {
 
     progress_bar.finish_and_clear();
     log::info!("downloaded package `{}`", package_manifest.name);
-  } else if let Some(check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
+
+    // TODO: Unzip and process it.
+  } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
     // TODO: Implement.
     todo!();
   } else if matches.is_present(ARG_FILE) {

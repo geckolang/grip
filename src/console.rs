@@ -62,11 +62,14 @@ pub fn print_diagnostic(
     codespan_files.add(file.0, file.1);
   }
 
-  // TODO: Handle possible error.
-  codespan_reporting::term::emit(
+  let emit_result = codespan_reporting::term::emit(
     &mut writer.lock(),
     &config,
     &codespan_files,
     &codespan_diagnostic,
   );
+
+  if let Err(error) = emit_result {
+    eprintln!("failed to emit diagnostic to the console: {}", error);
+  }
 }
