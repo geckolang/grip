@@ -101,7 +101,7 @@ pub fn build_single_file<'ctx>(
   let tokens = lexer.collect();
 
   if matches.is_present(crate::ARG_LIST_TOKENS) {
-    // TODO: Better printing
+    // TODO: Better printing.
     println!("tokens: {:?}\n\n", tokens);
   }
 

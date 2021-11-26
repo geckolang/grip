@@ -96,8 +96,7 @@ async fn main() {
   let set_logger_result = log::set_logger(&console::LOGGER);
 
   if let Err(error) = set_logger_result {
-    // TODO: Special case.
-    println!("there was an error initializing the logger: {}", error);
+    eprintln!("there was an error initializing the logger: {}", error);
 
     return;
   }
@@ -105,12 +104,12 @@ async fn main() {
   log::set_max_level(log::LevelFilter::Info);
 
   if let Some(_init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
-    // TODO: Pass in & process `init_arg_matches` instead of `matches`.
+    // TODO: Pass-in & process `init_arg_matches` instead of `matches`.
     package::init_package_manifest(&matches);
 
     return;
   } else if let Some(_build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    // TODO: Pass in & process `build_arg_matches` instead of `matches`.
+    // TODO: Pass-in & process `build_arg_matches` instead of `matches`.
     let build_result = package::build_package(&llvm_context, &matches);
 
     if build_result.is_some() {
@@ -291,7 +290,7 @@ async fn main() {
     progress_bar.finish_and_clear();
     log::info!("downloaded package `{}`", package_manifest.name);
 
-    // TODO: Unzip and process it.
+    // TODO: Continue implementation: unzip and process the downloaded package.
   } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
     // TODO: Implement.
     todo!();
