@@ -98,14 +98,18 @@ pub fn build_single_file<'ctx>(
 
   lexer.read_char();
 
-  let tokens = lexer.collect();
+  let tokens_result = lexer.collect();
+
+  if let Err(diagnostic) = tokens_result {
+    return Err(vec![diagnostic]);
+  }
 
   if matches.is_present(crate::ARG_LIST_TOKENS) {
     // TODO: Better printing.
-    println!("tokens: {:?}\n\n", tokens);
+    println!("tokens: {:?}\n\n", tokens_result.clone().unwrap());
   }
 
-  let mut parser = gecko::parser::Parser::new(tokens);
+  let mut parser = gecko::parser::Parser::new(tokens_result.unwrap());
   let module_decl_result = parser.parse_module_decl();
 
   if let Err(diagnostic) = module_decl_result {
@@ -147,7 +151,7 @@ pub fn build_single_file<'ctx>(
   }
 
   let mut name_resolution_pass = gecko::name_resolution_pass::NameResolutionPass::new();
-  let mut type_check_pass = gecko::type_check_pass::TypeCheckPass;
+  let mut type_check_pass = gecko::type_check_pass::TypeCheckPass::new();
   let mut entry_point_check_pass = gecko::entry_point_check_pass::EntryPointCheckPass::new();
   let mut pass_manager = gecko::pass_manager::PassManager::new();
 
