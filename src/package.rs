@@ -94,22 +94,29 @@ pub fn build_single_file<'ctx>(
   source_file_contents: &String,
   matches: &clap::ArgMatches<'_>,
 ) -> Result<(), Vec<gecko::diagnostic::Diagnostic>> {
-  let mut lexer = gecko::lexer::Lexer::new(source_file_contents.chars().collect());
-
-  lexer.read_char();
-
-  let tokens_result = lexer.collect();
+  let tokens_result = gecko::lexer::Lexer::new(source_file_contents.chars().collect()).collect();
 
   if let Err(diagnostic) = tokens_result {
     return Err(vec![diagnostic]);
   }
 
+  // Filter tokens to only include those that are relevant (ignore whitespace, comments, etc.).
+  let tokens: Vec<gecko::token::Token> = tokens_result
+    .unwrap()
+    .into_iter()
+    .filter(|token| match token {
+      gecko::token::Token::Whitespace(_) => false,
+      gecko::token::Token::Comment(_) => false,
+      _ => true,
+    })
+    .collect();
+
   if matches.is_present(crate::ARG_LIST_TOKENS) {
     // TODO: Better printing.
-    println!("tokens: {:?}\n\n", tokens_result.clone().unwrap());
+    println!("tokens: {:?}\n\n", tokens.clone());
   }
 
-  let mut parser = gecko::parser::Parser::new(tokens_result.unwrap());
+  let mut parser = gecko::parser::Parser::new(tokens);
   let module_decl_result = parser.parse_module_decl();
 
   if let Err(diagnostic) = module_decl_result {
