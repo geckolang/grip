@@ -94,7 +94,8 @@ pub fn build_single_file<'ctx>(
   source_file_contents: &String,
   matches: &clap::ArgMatches<'_>,
 ) -> Result<(), Vec<gecko::diagnostic::Diagnostic>> {
-  let tokens_result = gecko::lexer::Lexer::new(source_file_contents.chars().collect()).collect();
+  let tokens_result =
+    gecko::lexer::Lexer::new(source_file_contents.chars().collect()).collect_tokens();
 
   if let Err(diagnostic) = tokens_result {
     return Err(vec![diagnostic]);
@@ -117,60 +118,23 @@ pub fn build_single_file<'ctx>(
   }
 
   let mut parser = gecko::parser::Parser::new(tokens);
-  let module_decl_result = parser.parse_module_decl();
 
-  if let Err(diagnostic) = module_decl_result {
+  // TODO: Parse all possible modules.
+
+  let module_result = parser.parse_module();
+
+  if let Err(diagnostic) = module_result {
     return Err(vec![diagnostic]);
   }
 
-  let module_decl = module_decl_result.unwrap();
+  let module = module_result.unwrap();
   let mut diagnostics = Vec::new();
+  let mut llvm_lowering = gecko::llvm_lowering::LlvmLowering::new(&llvm_context, llvm_module);
 
-  let mut top_level_nodes = vec![gecko::pass_manager::TopLevelNodeTransport::Module(
-    module_decl,
-  )];
+  llvm_lowering.lower_module(&module);
 
-  while !parser.is_eof() {
-    let top_level_node = parser.parse_top_level_node();
-
-    if let Err(diagnostic) = top_level_node {
-      // TODO: Cloning diagnostic. Is this okay?
-      diagnostics.push(diagnostic.clone());
-
-      // NOTE: Parsing must stop here because the parser's index will
-      // not be updated upon parse errors (it will remain the same),
-      // thus making an infinite loop.
-      if diagnostic.is_error_like() {
-        break;
-      }
-
-      continue;
-    }
-
-    top_level_nodes.push(match top_level_node.unwrap() {
-      gecko::node::TopLevelNodeHolder::Function(function) => {
-        gecko::pass_manager::TopLevelNodeTransport::Function(function)
-      }
-      gecko::node::TopLevelNodeHolder::External(external) => {
-        gecko::pass_manager::TopLevelNodeTransport::External(external)
-      }
-    });
-  }
-
-  let mut name_resolution_pass = gecko::name_resolution_pass::NameResolutionPass::new();
-  let mut type_check_pass = gecko::type_check_pass::TypeCheckPass::new();
-  let mut entry_point_check_pass = gecko::entry_point_check_pass::EntryPointCheckPass::new();
-  let mut pass_manager = gecko::pass_manager::PassManager::new();
-
-  let mut llvm_lowering_pass =
-    gecko::llvm_lowering_pass::LlvmLoweringPass::new(&llvm_context, llvm_module);
-
-  pass_manager.add_pass(&mut name_resolution_pass);
-  pass_manager.add_pass(&mut type_check_pass);
-  pass_manager.add_pass(&mut entry_point_check_pass);
-  pass_manager.add_pass(&mut llvm_lowering_pass);
   // FIXME: For some reason it appears that all passes are being run by the amount of functions present on a single file (or it might actually be that the diagnostics are shown multiple times).
-  diagnostics.extend(pass_manager.run(&top_level_nodes));
+  // diagnostics.extend(pass_manager.run(&top_level_nodes));
 
   // TODO: Diagnostics vector may only contain non-error diagnostics. What if that's the case?
   return if diagnostics.is_empty() {
