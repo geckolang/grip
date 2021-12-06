@@ -129,12 +129,14 @@ pub fn build_single_file<'ctx>(
 
   let module = module_result.unwrap();
   let mut diagnostics = Vec::new();
+
+  // FIXME: Perform name resolution, type-checking, etc.
+
   let mut llvm_lowering = gecko::llvm_lowering::LlvmLowering::new(&llvm_context, llvm_module);
 
-  llvm_lowering.lower_module(&module);
-
-  // FIXME: For some reason it appears that all passes are being run by the amount of functions present on a single file (or it might actually be that the diagnostics are shown multiple times).
-  // diagnostics.extend(pass_manager.run(&top_level_nodes));
+  if let Err(diagnostic) = llvm_lowering.lower_module(&module) {
+    diagnostics.push(diagnostic);
+  }
 
   // TODO: Diagnostics vector may only contain non-error diagnostics. What if that's the case?
   return if diagnostics.is_empty() {
