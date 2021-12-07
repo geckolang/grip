@@ -127,15 +127,31 @@ pub fn build_single_file<'ctx>(
     return Err(vec![diagnostic]);
   }
 
-  let module = module_result.unwrap();
+  let mut module = module_result.unwrap();
   let mut diagnostics = Vec::new();
 
-  // FIXME: Perform name resolution, type-checking, etc.
+  // FIXME: Perform name resolution.
 
-  let mut llvm_lowering = gecko::llvm_lowering::LlvmLowering::new(&llvm_context, llvm_module);
+  if let Some(type_check_diagnostics) = gecko::type_check::type_check_module(&mut module) {
+    diagnostics.extend(type_check_diagnostics);
+  }
 
-  if let Err(diagnostic) = llvm_lowering.lower_module(&module) {
-    diagnostics.push(diagnostic);
+  // TODO: Better code structure for this flag.
+  let mut encountered_error = false;
+
+  for diagnostic in &diagnostics {
+    if diagnostic.is_error_like() {
+      encountered_error = true;
+    }
+  }
+
+  // Do not lower if there are errors.
+  if !encountered_error {
+    let mut llvm_lowering = gecko::llvm_lowering::LlvmLowering::new(&llvm_context, llvm_module);
+
+    if let Err(diagnostic) = llvm_lowering.lower_module(&module) {
+      diagnostics.push(diagnostic);
+    }
   }
 
   // TODO: Diagnostics vector may only contain non-error diagnostics. What if that's the case?
