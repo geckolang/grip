@@ -3,15 +3,14 @@
 use futures_util::StreamExt;
 use std::io::Write;
 
+mod build;
 mod console;
 mod package;
 
 const ARG_FILE: &str = "file";
-const ARG_LIST_TOKENS: &str = "list-tokens";
-const ARG_PRINT_LLVM_IR: &str = "print-llvm-ir";
+const ARG_LIST_TOKENS: &str = "tokens";
 const ARG_BUILD: &str = "build";
-const ARG_BUILD_SOURCES_DIR: &str = "sources-dir";
-const ARG_BUILD_OUTPUT_DIR: &str = "output-dir";
+const ARG_BUILD_PRINT_OUTPUT: &str = "print";
 const ARG_INIT: &str = "init";
 const ARG_INIT_NAME: &str = "name";
 const ARG_INIT_FORCE: &str = "force";
@@ -35,33 +34,21 @@ async fn main() {
         .help("The file to process")
         .index(1),
     )
-    .arg(
-      clap::Arg::with_name(ARG_LIST_TOKENS)
-        .short("t")
-        .long(ARG_LIST_TOKENS)
-        .help("Display a list of the lexed tokens"),
-    )
-    .arg(
-      clap::Arg::with_name(ARG_PRINT_LLVM_IR)
-        .short("i")
-        .long(ARG_PRINT_LLVM_IR)
-        .help("Print the resulting LLVM IR instead of producing an output file"),
-    )
     .subcommand(
       clap::SubCommand::with_name(ARG_BUILD)
         .about("Build the project in the current directory")
         .arg(
-          clap::Arg::with_name(ARG_BUILD_SOURCES_DIR)
-            .short("s")
-            .long(ARG_BUILD_SOURCES_DIR)
-            .default_value(DEFAULT_SOURCES_DIR),
+          clap::Arg::with_name(ARG_LIST_TOKENS)
+            .short("t")
+            .long(ARG_LIST_TOKENS)
+            .help("Display a list of the lexed tokens"),
         )
         .arg(
-          clap::Arg::with_name(ARG_BUILD_OUTPUT_DIR)
-            .short("o")
-            .long(ARG_BUILD_OUTPUT_DIR)
-            .default_value(DEFAULT_OUTPUT_DIR),
-        ),
+          clap::Arg::with_name(ARG_BUILD_PRINT_OUTPUT)
+            .short("p")
+            .long(ARG_BUILD_PRINT_OUTPUT)
+            .help("Print the resulting LLVM IR instead of producing an output file"),
+        )
     )
     .subcommand(
       clap::SubCommand::with_name(ARG_INIT)
@@ -103,29 +90,25 @@ async fn main() {
 
   log::set_max_level(log::LevelFilter::Info);
 
-  if let Some(_init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
-    // TODO: Pass-in & process `init_arg_matches` instead of `matches`.
-    package::init_package_manifest(&matches);
+  if let Some(init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
+    package::init_manifest(&init_arg_matches);
+  } else if let Some(build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
+    let build_result = build::build_package(&llvm_context, &build_arg_matches);
 
-    return;
-  } else if let Some(_build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    // TODO: Pass-in & process `build_arg_matches` instead of `matches`.
-    let build_result = package::build_package(&llvm_context, &matches);
-
-    if build_result.is_some() {
-      let build_result_tuple = build_result.unwrap();
-
-      let mut final_output_path = std::path::PathBuf::from(
-        matches
-          .subcommand_matches(ARG_BUILD)
-          .unwrap()
-          .value_of(ARG_BUILD_OUTPUT_DIR)
-          .unwrap(),
-      );
+    if let Ok(build_result_tuple) = build_result {
+      let mut final_output_path = std::path::PathBuf::from(DEFAULT_OUTPUT_DIR);
 
       final_output_path.push(build_result_tuple.1);
-      write_or_print_output(build_result_tuple.0, &final_output_path, &matches);
+
+      print_or_write_output(
+        build_result_tuple.0,
+        &final_output_path,
+        build_arg_matches.is_present(ARG_BUILD_PRINT_OUTPUT),
+      );
     }
+  } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
+    // TODO: Implement.
+    todo!();
   } else if let Some(install_arg_matches) = matches.subcommand_matches(ARG_INSTALL) {
     let reqwest_client = reqwest::Client::new();
     let github_repository_path = install_arg_matches.value_of(ARG_INSTALL_PATH).unwrap();
@@ -291,10 +274,9 @@ async fn main() {
     log::info!("downloaded package `{}`", package_manifest.name);
 
     // TODO: Continue implementation: unzip and process the downloaded package.
-  } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
-    // TODO: Implement.
-    todo!();
   } else if matches.is_present(ARG_FILE) {
+    // TODO: Make this positional under `build` subcommand instead.
+
     let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
     let llvm_context = inkwell::context::Context::create();
 
@@ -315,7 +297,7 @@ async fn main() {
     let source_file_contents = source_file_contents_result.unwrap();
 
     let build_result =
-      package::build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches);
+      build::build_single_file(&llvm_context, &llvm_module, &source_file_contents, &matches);
 
     if let Err(diagnostics) = build_result {
       for diagnostic in diagnostics {
@@ -335,7 +317,9 @@ async fn main() {
 
     output_file_path.push(source_file_path.file_stem().unwrap());
     output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
-    write_or_print_output(llvm_module, &output_file_path, &matches);
+
+    // TODO: Use `ARG_BUILD_PRINT_OUTPUT` after being a positional under `build` subcommand.
+    print_or_write_output(llvm_module, &output_file_path, false);
   } else {
     // TODO:
     // clap.Error::with_description("no file specified", clap::ErrorKind::MissingArgument);
@@ -344,18 +328,18 @@ async fn main() {
   }
 }
 
-fn write_or_print_output(
+// TODO: Consider expanding this function (or re-structuring it).
+fn print_or_write_output(
   llvm_module: inkwell::module::Module<'_>,
   output_file_path: &std::path::PathBuf,
-  matches: &clap::ArgMatches<'_>,
+  print: bool,
 ) {
   let llvm_ir = llvm_module.print_to_string().to_string();
 
-  if matches.is_present(crate::ARG_PRINT_LLVM_IR) {
-    println!("{}", llvm_ir);
-  } else {
-    if let Err(error) = std::fs::write(output_file_path, llvm_ir) {
-      log::error!("failed to write output file: {}", error);
-    }
+  if print {
+    // NOTE: The newline is to separate from the build completion message.
+    print!("\n{}", llvm_ir);
+  } else if let Err(error) = std::fs::write(output_file_path, llvm_ir) {
+    log::error!("failed to write output file: {}", error);
   }
 }
