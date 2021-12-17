@@ -28,8 +28,8 @@ async fn main() {
     .version(clap::crate_version!())
     .author(clap::crate_authors!())
     .about("Package manager & command-line utility for the gecko programming language")
+    // TODO: Make this a positional under the `build` subcommand.
     .arg(
-      // TODO: Take in a list of files instead.
       clap::Arg::with_name(ARG_FILE)
         .help("The file to process")
         .index(1),
@@ -319,7 +319,11 @@ async fn main() {
     output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
 
     // TODO: Use `ARG_BUILD_PRINT_OUTPUT` after being a positional under `build` subcommand.
-    print_or_write_output(llvm_module, &output_file_path, false);
+    print_or_write_output(
+      llvm_module.print_to_string().to_string(),
+      &output_file_path,
+      false,
+    );
   } else {
     // TODO:
     // clap.Error::with_description("no file specified", clap::ErrorKind::MissingArgument);
@@ -329,17 +333,11 @@ async fn main() {
 }
 
 // TODO: Consider expanding this function (or re-structuring it).
-fn print_or_write_output(
-  llvm_module: inkwell::module::Module<'_>,
-  output_file_path: &std::path::PathBuf,
-  print: bool,
-) {
-  let llvm_ir = llvm_module.print_to_string().to_string();
-
+fn print_or_write_output(output: String, output_file_path: &std::path::PathBuf, print: bool) {
   if print {
     // NOTE: The newline is to separate from the build completion message.
-    print!("\n{}", llvm_ir);
-  } else if let Err(error) = std::fs::write(output_file_path, llvm_ir) {
+    print!("\n{}", output);
+  } else if let Err(error) = std::fs::write(output_file_path, output) {
     log::error!("failed to write output file: {}", error);
   }
 }

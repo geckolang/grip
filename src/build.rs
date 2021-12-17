@@ -37,37 +37,43 @@ pub fn build_single_file<'ctx>(
 
   // TODO: Parse all possible modules.
 
-  let module_result = parser.parse_module();
+  let top_level_nodes_result = parser.parse_all();
 
-  if let Err(diagnostic) = module_result {
+  if let Err(diagnostic) = top_level_nodes_result {
     return Err(vec![diagnostic]);
   }
 
-  let mut module = module_result.unwrap();
-  let mut diagnostics = Vec::new();
+  let top_level_nodes = top_level_nodes_result.unwrap();
+  let diagnostics = Vec::new();
 
   // FIXME: Perform name resolution.
-
-  if let Some(type_check_diagnostics) = gecko::type_check::type_check_module(&mut module) {
-    diagnostics.extend(type_check_diagnostics);
-  }
+  // FIXME: Perform type checking.
 
   // TODO: Better code structure for this flag.
-  let mut encountered_error = false;
+  let encountered_error = false;
 
-  for diagnostic in &diagnostics {
-    if diagnostic.is_error_like() {
-      encountered_error = true;
-    }
-  }
+  // TODO:
+  // for diagnostic in &diagnostics {
+  //   if diagnostic.is_error_like() {
+  //     encountered_error = true;
+  //   }
+  // }
 
   // Do not lower if there are errors.
   if !encountered_error {
-    let mut llvm_lowering = gecko::llvm_lowering::LlvmLowering::new(&llvm_context, llvm_module);
+    use gecko::llvm_lowering::*;
 
-    if let Err(diagnostic) = llvm_lowering.lower_module(&module) {
-      diagnostics.push(diagnostic);
+    let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module);
+
+    let mut context = gecko::context::Context {
+      definitions: Vec::new(),
+    };
+
+    for top_level_node in top_level_nodes {
+      top_level_node.lower(&mut llvm_generator, &mut context);
     }
+
+    // TODO: Collect lowering diagnostics if any? There is none right now.
   }
 
   // TODO: Diagnostics vector may only contain non-error diagnostics. What if that's the case?
@@ -81,7 +87,7 @@ pub fn build_single_file<'ctx>(
 pub fn build_package<'a>(
   llvm_context: &'a inkwell::context::Context,
   build_arg_matches: &clap::ArgMatches<'_>,
-) -> Result<(inkwell::module::Module<'a>, std::path::PathBuf), String> {
+) -> Result<(String, std::path::PathBuf), String> {
   let package_manifest = package::read_manifest()?;
 
   let source_directories =
@@ -153,5 +159,5 @@ pub fn build_package<'a>(
 
   output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);
 
-  Ok((llvm_module, output_file_path))
+  Ok((llvm_module.print_to_string().to_string(), output_file_path))
 }
