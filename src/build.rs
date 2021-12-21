@@ -1,4 +1,6 @@
 use crate::package;
+use gecko::llvm_lowering::Lower;
+use gecko::name_resolution::Resolvable;
 use std::str::FromStr;
 
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
@@ -22,8 +24,7 @@ pub fn build_single_file<'ctx>(
     .unwrap()
     .into_iter()
     .filter(|token| match token {
-      gecko::token::Token::Whitespace(_) => false,
-      gecko::token::Token::Comment(_) => false,
+      gecko::token::Token::Whitespace(_) | gecko::token::Token::Comment(_) => false,
       _ => true,
     })
     .collect();
@@ -33,7 +34,8 @@ pub fn build_single_file<'ctx>(
     println!("tokens: {:?}\n\n", tokens.clone());
   }
 
-  let mut parser = gecko::parser::Parser::new(tokens);
+  let mut context = gecko::context::Context::new();
+  let mut parser = gecko::parser::Parser::new(tokens, &mut context);
 
   // TODO: Parse all possible modules.
 
@@ -43,7 +45,7 @@ pub fn build_single_file<'ctx>(
     return Err(vec![diagnostic]);
   }
 
-  let top_level_nodes = top_level_nodes_result.unwrap();
+  let mut top_level_nodes = top_level_nodes_result.unwrap();
   let diagnostics = Vec::new();
 
   // FIXME: Perform name resolution.
@@ -59,15 +61,22 @@ pub fn build_single_file<'ctx>(
   //   }
   // }
 
+  let mut name_resolver = gecko::name_resolution::NameResolver::new();
+
+  // TODO: Any way to simplify from having too loops/passes into one?
+  for top_level_node in &mut top_level_nodes {
+    top_level_node.declare(&mut name_resolver, &mut context);
+
+    // TODO: Perform type-checking here as well?
+  }
+
+  for top_level_node in &mut top_level_nodes {
+    top_level_node.resolve(&mut name_resolver, &mut context);
+  }
+
   // Do not lower if there are errors.
   if !encountered_error {
-    use gecko::llvm_lowering::*;
-
     let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module);
-
-    let mut context = gecko::context::Context {
-      definitions: Vec::new(),
-    };
 
     for top_level_node in top_level_nodes {
       top_level_node.lower(&mut llvm_generator, &mut context);
@@ -155,6 +164,7 @@ pub fn build_package<'a>(
     progress_bar.elapsed().as_secs()
   );
 
+  // TODO: Should the output file's path be handled here?
   let mut output_file_path = std::path::PathBuf::from(package_manifest.name.clone());
 
   output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);

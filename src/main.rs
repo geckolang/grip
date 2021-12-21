@@ -316,7 +316,7 @@ async fn main() {
     let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
 
     output_file_path.push(source_file_path.file_stem().unwrap());
-    output_file_path.set_extension(package::PATH_OUTPUT_FILE_EXTENSION);
+    output_file_path.set_extension(build::PATH_OUTPUT_FILE_EXTENSION);
 
     // TODO: Use `ARG_BUILD_PRINT_OUTPUT` after being a positional under `build` subcommand.
     print_or_write_output(

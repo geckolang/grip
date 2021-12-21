@@ -1,6 +1,5 @@
 pub const PATH_MANIFEST_FILE: &str = "grip.toml";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
-pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct PackageManifest {
