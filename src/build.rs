@@ -9,6 +9,7 @@ pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 pub fn build_single_file<'ctx>(
   llvm_context: &'ctx inkwell::context::Context,
   llvm_module: &inkwell::module::Module<'ctx>,
+  source_file_name: String,
   source_file_contents: &String,
   build_arg_matches: &clap::ArgMatches<'_>,
 ) -> Result<(), Vec<gecko::diagnostic::Diagnostic>> {
@@ -76,7 +77,8 @@ pub fn build_single_file<'ctx>(
 
   // Do not lower if there are errors.
   if !encountered_error {
-    let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module);
+    let mut llvm_generator =
+      gecko::llvm_lowering::LlvmGenerator::new(source_file_name, llvm_context, &llvm_module);
 
     for top_level_node in top_level_nodes {
       top_level_node.lower(&mut llvm_generator, &mut context);
@@ -114,7 +116,8 @@ pub fn build_package<'a>(
   );
 
   for path in source_directories {
-    let source_file_name = path.file_name().unwrap().to_string_lossy();
+    // TODO: File names need to conform to identifier rules.
+    let source_file_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
     progress_bar.set_message(format!("{}", source_file_name));
 
@@ -124,6 +127,7 @@ pub fn build_package<'a>(
     if let Err(diagnostics) = build_single_file(
       &llvm_context,
       &llvm_module,
+      source_file_name,
       &source_file_contents,
       &build_arg_matches,
     ) {
