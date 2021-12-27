@@ -23,13 +23,26 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
     return false;
   }
 
-  if std::fs::create_dir(crate::DEFAULT_SOURCES_DIR).is_err() {
-    log::error!("failed to create sources directory");
+  log::info!(
+    "Creating package in {:?}",
+    std::fs::canonicalize(".").unwrap()
+  );
 
+  if let Err(e) = std::fs::create_dir(crate::DEFAULT_SOURCES_DIR) {
+    log::error!(
+      "Failed to create sources directory {:?}",
+      crate::DEFAULT_SOURCES_DIR
+    );
+    log::error!("{}", e);
     return false;
-  } else if std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR).is_err() {
-    log::error!("failed to create output directory");
+  }
 
+  if let Err(e) = std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR) {
+    log::error!(
+      "Failed to create output directory {:?}",
+      crate::DEFAULT_OUTPUT_DIR
+    );
+    log::error!("{}", e);
     return false;
   }
 
@@ -41,7 +54,7 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
         .value_of(crate::ARG_INIT_NAME)
         .unwrap(),
     ),
-    version: String::from("0.0.1"),
+    version: String::from("0.1.0"),
   });
 
   if let Err(error) = default_package_manifest {
@@ -87,44 +100,55 @@ pub fn fetch_source_file_contents(source_file_path: &std::path::PathBuf) -> Resu
 }
 
 pub fn read_manifest() -> Result<PackageManifest, String> {
-  let manifest_file_contents_result = std::fs::read_to_string(PATH_MANIFEST_FILE);
+  let manifest_file_contents_result = match std::fs::read_to_string(PATH_MANIFEST_FILE) {
+    Err(error) => {
+      log::error!(
+        "Failed to read package manifest {:?}",
+        std::fs::canonicalize(PATH_MANIFEST_FILE)
+          .unwrap_or(std::path::PathBuf::from(PATH_MANIFEST_FILE))
+      );
+      log::error!("{}", error);
+      return Err(format!("{}", error));
+    }
+    Ok(v) => v,
+  };
 
-  if let Err(error) = manifest_file_contents_result {
-    return Err(format!("failed to read package manifest file: {}", error));
+  match toml::from_str::<PackageManifest>(manifest_file_contents_result.as_str()) {
+    Err(error) => {
+      log::error!(
+        "Failed to parse package manifest {:?}",
+        std::fs::canonicalize(PATH_MANIFEST_FILE)
+          .unwrap_or(std::path::PathBuf::from(PATH_MANIFEST_FILE))
+      );
+      log::error!("{}", error);
+      Err(format!("{}", error))
+    }
+    Ok(v) => Ok(v),
   }
-
-  let package_manifest_result =
-    toml::from_str::<PackageManifest>(manifest_file_contents_result.unwrap().as_str());
-
-  if let Err(error) = package_manifest_result {
-    return Err(format!("failed to parse package manifest file: {}", error));
-  }
-
-  Ok(package_manifest_result.unwrap())
 }
 
 pub fn read_sources_dir(
   sources_dir: &std::path::PathBuf,
 ) -> Result<Vec<std::path::PathBuf>, String> {
-  let read_dir_result = std::fs::read_dir(sources_dir);
+  match std::fs::read_dir(sources_dir) {
+    Err(error) => {
+      log::error!("Failed to read sources directory {:?}", sources_dir);
+      log::error!("{}", error);
+      Err(format!("{}", error))
+    }
+    Ok(result) => Ok(
+      result
+        .map(|path_result| path_result.unwrap().path())
+        .filter(|path| {
+          if !path.is_file() {
+            return false;
+          }
 
-  if let Err(error) = read_dir_result {
-    return Err(format!("failed to read sources directory: {}", error));
+          let extension = path.extension();
+
+          extension.is_some() && extension.unwrap() == PATH_SOURCE_FILE_EXTENSION
+        })
+        .collect::<Vec<std::path::PathBuf>>(),
+    ),
   }
-
-  Ok(
-    read_dir_result
-      .unwrap()
-      .map(|path_result| path_result.unwrap().path())
-      .filter(|path| {
-        if !path.is_file() {
-          return false;
-        }
-
-        let extension = path.extension();
-
-        extension.is_some() && extension.unwrap() == PATH_SOURCE_FILE_EXTENSION
-      })
-      .collect::<Vec<std::path::PathBuf>>(),
-  )
 }

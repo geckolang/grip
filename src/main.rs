@@ -28,12 +28,6 @@ async fn main() -> Result<(), i32> {
     .version(clap::crate_version!())
     .author(clap::crate_authors!())
     .about("Package manager & command-line utility for the gecko programming language")
-    // TODO: Make this a positional under the `build` subcommand.
-    .arg(
-      clap::Arg::with_name(ARG_FILE)
-        .help("The file to process")
-        .index(1),
-    )
     .subcommand(
       clap::SubCommand::with_name(ARG_BUILD)
         .about("Build the project in the current directory")
@@ -48,6 +42,11 @@ async fn main() -> Result<(), i32> {
             .short("p")
             .long(ARG_BUILD_PRINT_OUTPUT)
             .help("Print the resulting LLVM IR instead of producing an output file"),
+        )
+        .arg(
+          clap::Arg::with_name(ARG_FILE)
+            .help("The file to process")
+            .index(1),
         )
     )
     .subcommand(

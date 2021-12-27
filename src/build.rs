@@ -119,7 +119,7 @@ pub fn build_package<'a>(
     // TODO: File names need to conform to identifier rules.
     let source_file_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
-    progress_bar.set_message(format!("{}", source_file_name));
+    progress_bar.set_message(source_file_name.clone());
 
     // TODO: Clear progress bar on error.
     let source_file_contents = package::fetch_source_file_contents(&path)?;
@@ -159,7 +159,7 @@ pub fn build_package<'a>(
     progress_bar.inc(1);
   }
 
-  progress_bar.finish_and_clear();
+  progress_bar.finish();
 
   // TODO: In the future, use the appropriate time unit (min, sec, etc.) instead of just `s`.
   log::info!(
