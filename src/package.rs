@@ -79,7 +79,7 @@ pub fn fetch_source_file_contents(source_file_path: &std::path::PathBuf) -> Resu
 
   if source_file_contents.is_err() {
     return Err(String::from(
-      "path does not exist or its contents are not valid UTF-8",
+      "path does not exist or its contents are not valid utf-8",
     ));
   }
 

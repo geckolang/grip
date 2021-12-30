@@ -37,9 +37,6 @@ pub fn build_single_file<'ctx>(
 
   let mut context = gecko::context::Context::new();
   let mut parser = gecko::parser::Parser::new(tokens, &mut context);
-
-  // TODO: Parse all possible modules.
-
   let top_level_nodes_result = parser.parse_all();
 
   if let Err(diagnostic) = top_level_nodes_result {
@@ -47,10 +44,7 @@ pub fn build_single_file<'ctx>(
   }
 
   let mut top_level_nodes = top_level_nodes_result.unwrap();
-  let diagnostics = Vec::new();
-
-  // FIXME: Perform name resolution.
-  // FIXME: Perform type checking.
+  let mut diagnostics = Vec::new();
 
   // TODO: Better code structure for this flag.
   let encountered_error = false;
@@ -64,16 +58,17 @@ pub fn build_single_file<'ctx>(
 
   let mut name_resolver = gecko::name_resolution::NameResolver::new();
 
-  // TODO: Any way to simplify from having too loops/passes into one?
   for top_level_node in &mut top_level_nodes {
     top_level_node.declare(&mut name_resolver, &mut context);
-
-    // TODO: Perform type-checking here as well?
   }
 
   for top_level_node in &mut top_level_nodes {
     top_level_node.resolve(&mut name_resolver, &mut context);
   }
+
+  diagnostics.extend::<Vec<_>>(name_resolver.diagnostics.into());
+
+  // FIXME: Perform type checking after name resolution.
 
   // Do not lower if there are errors.
   if !encountered_error {

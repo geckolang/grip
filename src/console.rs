@@ -50,7 +50,7 @@ pub fn print_diagnostic(
     })
     .with_message(diagnostic.message.clone());
 
-  // TODO: Add labels.
+  // TODO: Add support for labels.
 
   if diagnostic.severity == gecko::diagnostic::Severity::Internal {
     codespan_diagnostic
