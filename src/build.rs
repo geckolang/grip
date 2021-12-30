@@ -12,12 +12,12 @@ pub fn build_single_file<'ctx>(
   source_file_name: String,
   source_file_contents: &String,
   build_arg_matches: &clap::ArgMatches<'_>,
-) -> Result<(), Vec<gecko::diagnostic::Diagnostic>> {
-  let tokens_result =
-    gecko::lexer::Lexer::new(source_file_contents.chars().collect()).collect_tokens();
+) -> Vec<gecko::diagnostic::Diagnostic> {
+  let tokens_result = gecko::lexer::Lexer::new(source_file_contents.chars().collect()).lex_all();
 
+  // TODO: Can't lexing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
   if let Err(diagnostic) = tokens_result {
-    return Err(vec![diagnostic]);
+    return vec![diagnostic];
   }
 
   // Filter tokens to only include those that are relevant (ignore whitespace, comments, etc.).
@@ -39,8 +39,9 @@ pub fn build_single_file<'ctx>(
   let mut parser = gecko::parser::Parser::new(tokens, &mut context);
   let top_level_nodes_result = parser.parse_all();
 
+  // TODO: Can't parsing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
   if let Err(diagnostic) = top_level_nodes_result {
-    return Err(vec![diagnostic]);
+    return vec![diagnostic];
   }
 
   let mut top_level_nodes = top_level_nodes_result.unwrap();
@@ -82,12 +83,7 @@ pub fn build_single_file<'ctx>(
     // TODO: Collect lowering diagnostics if any? There is none right now.
   }
 
-  // TODO: Diagnostics vector may only contain non-error diagnostics. What if that's the case?
-  return if diagnostics.is_empty() {
-    Ok(())
-  } else {
-    Err(diagnostics)
-  };
+  diagnostics
 }
 
 pub fn build_package<'a>(
@@ -119,16 +115,18 @@ pub fn build_package<'a>(
     // TODO: Clear progress bar on error.
     let source_file_contents = package::fetch_source_file_contents(&path)?;
 
-    if let Err(diagnostics) = build_single_file(
+    let build_diagnostics = build_single_file(
       &llvm_context,
       &llvm_module,
       source_file_name,
       &source_file_contents,
       &build_arg_matches,
-    ) {
+    );
+
+    if !build_diagnostics.is_empty() {
       let mut error_encountered = false;
 
-      for diagnostic in diagnostics {
+      for diagnostic in build_diagnostics {
         // TODO: Maybe fix this by clearing then re-writing the progress bar.
         // FIXME: This will interfere with the progress bar (leave it behind).
         crate::console::print_diagnostic(

@@ -300,7 +300,7 @@ async fn main() -> Result<(), i32> {
 
     // TODO: File names need to conform to identifier rules.
 
-    let build_result = build::build_single_file(
+    let build_diagnostics = build::build_single_file(
       &llvm_context,
       &llvm_module,
       source_file_path
@@ -313,8 +313,8 @@ async fn main() -> Result<(), i32> {
     );
 
     // TODO: What if its just non-erroneous diagnostics?
-    if let Err(diagnostics) = build_result {
-      for diagnostic in diagnostics {
+    if !build_diagnostics.is_empty() {
+      for diagnostic in build_diagnostics {
         console::print_diagnostic(
           vec![(
             &source_file_path.clone().to_str().unwrap().to_string(),
