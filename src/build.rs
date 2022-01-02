@@ -1,6 +1,7 @@
 use crate::package;
 use gecko::llvm_lowering::Lower;
 use gecko::name_resolution::Resolvable;
+use gecko::type_check::TypeCheck;
 use std::str::FromStr;
 
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
@@ -69,7 +70,14 @@ pub fn build_single_file<'ctx>(
 
   diagnostics.extend::<Vec<_>>(name_resolver.diagnostics.into());
 
-  // FIXME: Perform type checking after name resolution.
+  let mut type_context = gecko::type_check::TypeCheckContext::new();
+
+  // Perform type-checking pass.
+  for top_level_node in &mut top_level_nodes {
+    top_level_node.type_check(&mut type_context, &mut context);
+  }
+
+  diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
 
   // Do not lower if there are errors.
   if !encountered_error {
