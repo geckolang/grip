@@ -47,17 +47,6 @@ pub fn build_single_file<'ctx>(
 
   let mut top_level_nodes = top_level_nodes_result.unwrap();
   let mut diagnostics = Vec::new();
-
-  // TODO: Better code structure for this flag.
-  let encountered_error = false;
-
-  // TODO:
-  // for diagnostic in &diagnostics {
-  //   if diagnostic.is_error_like() {
-  //     encountered_error = true;
-  //   }
-  // }
-
   let mut name_resolver = gecko::name_resolution::NameResolver::new();
 
   for top_level_node in &mut top_level_nodes {
@@ -78,6 +67,15 @@ pub fn build_single_file<'ctx>(
   }
 
   diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
+
+  // TODO: Better code structure for this flag.
+  let mut encountered_error = false;
+
+  for diagnostic in &diagnostics {
+    if diagnostic.is_error_like() {
+      encountered_error = true;
+    }
+  }
 
   // Do not lower if there are errors.
   if !encountered_error {
