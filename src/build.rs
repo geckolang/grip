@@ -171,6 +171,7 @@ pub fn build_package<'a>(
   let mut output_file_path = std::path::PathBuf::from(package_manifest.name.clone());
 
   output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);
+  assert!(llvm_module.verify().is_ok());
 
   Ok((llvm_module.print_to_string().to_string(), output_file_path))
 }
