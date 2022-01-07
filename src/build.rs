@@ -109,7 +109,7 @@ pub fn build_package<'a>(
 
   progress_bar.set_style(
     indicatif::ProgressStyle::default_bar()
-      .template("building: {msg} [{bar:30}] {pos}/{len} {elapsed_precise}"),
+      .template("building: {msg} [{bar:15}] {pos}/{len} {elapsed_precise}"),
   );
 
   for path in source_directories {
