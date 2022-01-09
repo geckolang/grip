@@ -1,4 +1,5 @@
 use crate::package;
+use gecko::lint::Lint;
 use gecko::llvm_lowering::Lower;
 use gecko::name_resolution::Resolvable;
 use gecko::type_check::TypeCheck;
@@ -14,7 +15,7 @@ pub fn build_single_file<'ctx>(
   source_file_contents: &String,
   build_arg_matches: &clap::ArgMatches<'_>,
 ) -> Vec<gecko::diagnostic::Diagnostic> {
-  let tokens_result = gecko::lexer::Lexer::new(source_file_contents.chars().collect()).lex_all();
+  let tokens_result = gecko::lexer::Lexer::from_str(source_file_contents).lex_all();
 
   // TODO: Can't lexing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
   if let Err(diagnostic) = tokens_result {
@@ -68,17 +69,23 @@ pub fn build_single_file<'ctx>(
 
   diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
 
-  // TODO: Better code structure for this flag.
-  let mut encountered_error = false;
+  let mut lint_context = gecko::lint::LintContext::new();
 
-  for diagnostic in &diagnostics {
-    if diagnostic.is_error_like() {
-      encountered_error = true;
-    }
+  // Perform linting.
+  for top_level_node in &mut top_level_nodes {
+    top_level_node.lint(&mut context, &mut lint_context);
   }
 
+  lint_context.finalize(&context);
+  diagnostics.extend::<Vec<_>>(lint_context.diagnostics.into());
+
+  let error_encountered = diagnostics
+    .iter()
+    .find(|diagnostic| diagnostic.is_error_like())
+    .is_some();
+
   // Do not lower if there are errors.
-  if !encountered_error {
+  if !error_encountered {
     let mut llvm_generator =
       gecko::llvm_lowering::LlvmGenerator::new(source_file_name, llvm_context, &llvm_module);
 
