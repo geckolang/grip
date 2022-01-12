@@ -11,7 +11,7 @@ codegen-units = 1  # Use a single codegen unit.
 [dependencies]
 gecko = { path = "../gecko" }
 clap = "2.33.3"
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm13-0"] }
 toml = "0.5.8"
 serde = { version = "1.0", features = ["derive"] }
 codespan-reporting = "0.11.1"
