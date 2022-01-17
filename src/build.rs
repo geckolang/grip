@@ -26,8 +26,8 @@ pub fn build_single_file<'ctx>(
   let tokens: Vec<gecko::token::Token> = tokens_result
     .unwrap()
     .into_iter()
-    .filter(|token| match token {
-      gecko::token::Token::Whitespace(_) | gecko::token::Token::Comment(_) => false,
+    .filter(|token| match token.0 {
+      gecko::token::TokenKind::Whitespace(_) | gecko::token::TokenKind::Comment(_) => false,
       _ => true,
     })
     .collect();
