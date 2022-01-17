@@ -143,6 +143,7 @@ pub fn build_package<'a>(
         // TODO: Maybe fix this by clearing then re-writing the progress bar.
         // FIXME: This will interfere with the progress bar (leave it behind).
         crate::console::print_diagnostic(
+          source_file_contents.as_str(),
           vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
           &diagnostic,
         );

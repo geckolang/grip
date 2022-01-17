@@ -12,12 +12,7 @@ pub struct PackageManifest {
 pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
   let manifest_file_path = std::path::Path::new(PATH_MANIFEST_FILE);
 
-  if manifest_file_path.exists()
-    && !matches
-      .subcommand_matches(crate::ARG_INIT)
-      .unwrap()
-      .is_present(crate::ARG_INIT_FORCE)
-  {
+  if manifest_file_path.exists() && !matches.is_present(crate::ARG_INIT_FORCE) {
     log::error!("manifest file already exists in this directory");
 
     return false;
@@ -34,13 +29,7 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
   }
 
   let default_package_manifest = toml::ser::to_string_pretty(&PackageManifest {
-    name: String::from(
-      matches
-        .subcommand_matches(crate::ARG_INIT)
-        .unwrap()
-        .value_of(crate::ARG_INIT_NAME)
-        .unwrap(),
-    ),
+    name: String::from(matches.value_of(crate::ARG_INIT_NAME).unwrap()),
     version: String::from("0.0.1"),
   });
 

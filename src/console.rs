@@ -32,6 +32,7 @@ impl log::Log for Logger {
 }
 
 pub fn print_diagnostic(
+  source: &str,
   files: Vec<(&String, &String)>,
   diagnostic: &gecko::diagnostic::Diagnostic,
 ) {
@@ -49,6 +50,17 @@ pub fn print_diagnostic(
       gecko::diagnostic::Severity::Internal => codespan_reporting::diagnostic::Severity::Bug,
     })
     .with_message(diagnostic.message.clone());
+
+  // Display the source (if applicable).
+  if let Some(location) = &diagnostic.location {
+    // TODO: Is there a need to re-assign here?
+    codespan_diagnostic =
+      codespan_diagnostic.with_labels(vec![codespan_reporting::diagnostic::Label::primary(
+        // FIXME: Temporary value. Need actual file id (is this the index?).
+        0,
+        location.clone(),
+      )]);
+  }
 
   if diagnostic.severity == gecko::diagnostic::Severity::Internal {
     codespan_diagnostic

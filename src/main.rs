@@ -53,7 +53,7 @@ async fn main() -> Result<(), i32> {
     .subcommand(
       clap::SubCommand::with_name(ARG_INIT)
         .about("Initialize a default package manifest file in the current directory")
-        .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project"))
+        .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project").index(1))
         .arg(
           clap::Arg::with_name(ARG_INIT_FORCE)
             .help("Reinitialize an existing package manifest file if applicable")
@@ -316,6 +316,7 @@ async fn main() -> Result<(), i32> {
     if !build_diagnostics.is_empty() {
       for diagnostic in build_diagnostics {
         console::print_diagnostic(
+          source_file_contents.as_str(),
           vec![(
             &source_file_path.clone().to_str().unwrap().to_string(),
             &source_file_contents,
