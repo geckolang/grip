@@ -32,7 +32,6 @@ impl log::Log for Logger {
 }
 
 pub fn print_diagnostic(
-  source: &str,
   files: Vec<(&String, &String)>,
   diagnostic: &gecko::diagnostic::Diagnostic,
 ) {

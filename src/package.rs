@@ -114,6 +114,7 @@ pub fn read_sources_dir(
 
         extension.is_some() && extension.unwrap() == PATH_SOURCE_FILE_EXTENSION
       })
-      .collect::<Vec<std::path::PathBuf>>(),
+      .collect::<Vec<std::path::PathBuf>>()
+      .into(),
   )
 }

@@ -23,7 +23,7 @@ const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
 
 #[tokio::main]
-async fn main() -> Result<(), i32> {
+async fn main() -> i32 {
   let app = clap::App::new("Grip")
     .version(clap::crate_version!())
     .author(clap::crate_authors!())
@@ -85,7 +85,7 @@ async fn main() -> Result<(), i32> {
   if let Err(error) = set_logger_result {
     eprintln!("there was an error initializing the logger: {}", error);
 
-    return Err(1);
+    return 1;
   }
 
   log::set_max_level(log::LevelFilter::Info);
@@ -106,7 +106,7 @@ async fn main() -> Result<(), i32> {
         build_arg_matches.is_present(ARG_BUILD_PRINT_OUTPUT),
       );
     } else {
-      return Err(1);
+      return 1;
     }
   } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
     // TODO: Implement.
@@ -130,7 +130,7 @@ async fn main() -> Result<(), i32> {
     if let Err(error) = package_manifest_file_response_result {
       log::error!("failed to fetching the package manifest file: {}", error);
 
-      return Err(1);
+      return 1;
     }
 
     let package_manifest_file_response = package_manifest_file_response_result.unwrap();
@@ -138,14 +138,14 @@ async fn main() -> Result<(), i32> {
     if package_manifest_file_response.status() == reqwest::StatusCode::NOT_FOUND {
       log::error!("the package manifest file was not found on the requested repository");
 
-      return Err(1);
+      return 1;
     } else if !package_manifest_file_response.status().is_success() {
       log::error!(
         "failed to fetching the package manifest file: HTTP error {}",
         package_manifest_file_response.status()
       );
 
-      return Err(1);
+      return 1;
     }
 
     let package_manifest_file_text = package_manifest_file_response.text().await;
@@ -153,7 +153,7 @@ async fn main() -> Result<(), i32> {
     if let Err(error) = package_manifest_file_text {
       log::error!("failed to fetching the package manifest file: {}", error);
 
-      return Err(1);
+      return 1;
     }
 
     let package_manifest_result =
@@ -162,7 +162,7 @@ async fn main() -> Result<(), i32> {
     if let Err(error) = package_manifest_result {
       log::error!("failed to parse the package manifest file: {}", error);
 
-      return Err(1);
+      return 1;
     }
 
     let package_manifest = package_manifest_result.unwrap();
@@ -179,7 +179,7 @@ async fn main() -> Result<(), i32> {
       if let Err(error) = response_result {
         log::error!("failed to download the package: {}", error);
 
-        return Err(1);
+        return 1;
       }
 
       response_result.unwrap()
@@ -191,7 +191,7 @@ async fn main() -> Result<(), i32> {
         package_zip_file_response.status()
       );
 
-      return Err(1);
+      return 1;
     }
 
     let file_size = {
@@ -201,7 +201,7 @@ async fn main() -> Result<(), i32> {
       if content_length.is_none() {
         log::error!("failed to download the package: no content length");
 
-        return Err(1);
+        return 1;
       }
 
       content_length.unwrap()
@@ -223,7 +223,7 @@ async fn main() -> Result<(), i32> {
       if let Err(error) = std::fs::create_dir_all(file_path.clone()) {
         log::error!("failed to create the dependencies directory: {}", error);
 
-        return Err(1);
+        return 1;
       }
     }
 
@@ -240,7 +240,7 @@ async fn main() -> Result<(), i32> {
           error
         );
 
-        return Err(1);
+        return 1;
       }
 
       file_result.unwrap()
@@ -254,7 +254,7 @@ async fn main() -> Result<(), i32> {
         progress_bar.finish_and_clear();
         log::error!("failed to download the package: {}", error);
 
-        return Err(1);
+        return 1;
       }
 
       let chunk = chunk_result.unwrap();
@@ -263,7 +263,7 @@ async fn main() -> Result<(), i32> {
         progress_bar.finish_and_clear();
         log::error!("failed to write to output file: {}", error);
 
-        return Err(1);
+        return 1;
       }
 
       let new_progress_position = std::cmp::min(downloaded_bytes + (chunk.len() as u64), file_size);
@@ -293,7 +293,7 @@ async fn main() -> Result<(), i32> {
     if let Err(error) = source_file_contents_result {
       log::error!("failed to read source file contents: {}", error);
 
-      return Err(1);
+      return 1;
     }
 
     let source_file_contents = source_file_contents_result.unwrap();
@@ -316,7 +316,6 @@ async fn main() -> Result<(), i32> {
     if !build_diagnostics.is_empty() {
       for diagnostic in build_diagnostics {
         console::print_diagnostic(
-          source_file_contents.as_str(),
           vec![(
             &source_file_path.clone().to_str().unwrap().to_string(),
             &source_file_contents,
@@ -325,7 +324,7 @@ async fn main() -> Result<(), i32> {
         );
       }
 
-      return Err(1);
+      return 1;
     }
 
     let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
@@ -345,10 +344,8 @@ async fn main() -> Result<(), i32> {
     log::error!("try running `grip --help`");
     // app.print_long_help();
 
-    return Err(1);
+    return 1;
   }
-
-  Ok(())
 }
 
 // TODO: Consider expanding this function (or re-structuring it).

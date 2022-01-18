@@ -84,7 +84,7 @@ pub fn build_single_file<'ctx>(
     .find(|diagnostic| diagnostic.is_error_like())
     .is_some();
 
-  // Do not lower if there are errors.
+  // Do not lower if there are any errors.
   if !error_encountered {
     let mut llvm_generator =
       gecko::llvm_lowering::LlvmGenerator::new(source_file_name, llvm_context, &llvm_module);
@@ -143,7 +143,6 @@ pub fn build_package<'a>(
         // TODO: Maybe fix this by clearing then re-writing the progress bar.
         // FIXME: This will interfere with the progress bar (leave it behind).
         crate::console::print_diagnostic(
-          source_file_contents.as_str(),
           vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
           &diagnostic,
         );
