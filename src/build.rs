@@ -8,6 +8,7 @@ use std::str::FromStr;
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
 // TODO: Consider returning a `Vec<diagnostic::Diagnostic>` containing the actual problem(s) encountered.
+// TODO: Merge `source_file_name` and `source_file_contents` into a tuple.
 pub fn build_single_file<'ctx>(
   llvm_context: &'ctx inkwell::context::Context,
   llvm_module: &inkwell::module::Module<'ctx>,
@@ -60,42 +61,50 @@ pub fn build_single_file<'ctx>(
 
   diagnostics.extend::<Vec<_>>(name_resolver.diagnostics.into());
 
-  let mut type_context = gecko::type_check::TypeCheckContext::new();
-
-  // Perform type-checking pass.
-  for top_level_node in &mut top_level_nodes {
-    top_level_node.type_check(&mut type_context, &mut context);
-  }
-
-  diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
-
-  let mut lint_context = gecko::lint::LintContext::new();
-
-  // Perform linting.
-  for top_level_node in &mut top_level_nodes {
-    top_level_node.lint(&mut context, &mut lint_context);
-  }
-
-  lint_context.finalize(&context);
-  diagnostics.extend::<Vec<_>>(lint_context.diagnostics.into());
-
-  let error_encountered = diagnostics
+  let mut error_encountered = diagnostics
     .iter()
     .find(|diagnostic| diagnostic.is_error_like())
     .is_some();
 
-  // Do not lower if there are any errors.
+  // Cannot continue to any more phases if name resolution failed.
   if !error_encountered {
-    let mut llvm_generator =
-      gecko::llvm_lowering::LlvmGenerator::new(source_file_name, llvm_context, &llvm_module);
+    let mut type_context = gecko::type_check::TypeCheckContext::new();
 
-    for top_level_node in top_level_nodes {
-      top_level_node.lower(&mut llvm_generator, &mut context);
+    // Perform type-checking.
+    for top_level_node in &mut top_level_nodes {
+      top_level_node.type_check(&mut type_context, &mut context);
     }
 
-    // TODO: Collect lowering diagnostics if any? There is none right now.
-  }
+    diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
 
+    let mut lint_context = gecko::lint::LintContext::new();
+
+    // Perform linting.
+    for top_level_node in &mut top_level_nodes {
+      top_level_node.lint(&mut context, &mut lint_context);
+    }
+
+    lint_context.finalize(&context);
+    diagnostics.extend::<Vec<_>>(lint_context.diagnostics.into());
+
+    error_encountered = diagnostics
+      .iter()
+      .find(|diagnostic| diagnostic.is_error_like())
+      .is_some();
+
+    // Do not attempt to lower if there were any errors.
+    if !error_encountered {
+      let mut llvm_generator =
+        gecko::llvm_lowering::LlvmGenerator::new(source_file_name, llvm_context, &llvm_module);
+
+      for top_level_node in top_level_nodes {
+        top_level_node.lower(&mut llvm_generator, &mut context);
+      }
+    }
+
+    // TODO: Collect lowering diagnostics if any? There are none right now.
+  }
+  
   diagnostics
 }
 
