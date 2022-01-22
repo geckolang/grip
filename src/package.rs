@@ -101,20 +101,20 @@ pub fn read_sources_dir(
     return Err(format!("failed to read sources directory: {}", error));
   }
 
-  Ok(
-    read_dir_result
-      .unwrap()
-      .map(|path_result| path_result.unwrap().path())
-      .filter(|path| {
-        if !path.is_file() {
-          return false;
-        }
+  let files = read_dir_result
+    .unwrap()
+    .map(|path_result| path_result.unwrap().path())
+    .filter(|path| {
+      if !path.is_file() {
+        return false;
+      }
 
-        let extension = path.extension();
+      let extension = path.extension();
 
-        extension.is_some() && extension.unwrap() == PATH_SOURCE_FILE_EXTENSION
-      })
-      .collect::<Vec<std::path::PathBuf>>()
-      .into(),
-  )
+      extension.is_some() && extension.unwrap() == PATH_SOURCE_FILE_EXTENSION
+    })
+    .collect::<Vec<std::path::PathBuf>>()
+    .into();
+
+  Ok(files)
 }

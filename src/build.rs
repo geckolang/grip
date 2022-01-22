@@ -7,16 +7,13 @@ use std::str::FromStr;
 
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
-// TODO: Consider returning a `Vec<diagnostic::Diagnostic>` containing the actual problem(s) encountered.
-// TODO: Merge `source_file_name` and `source_file_contents` into a tuple.
 pub fn build_single_file<'ctx>(
   llvm_context: &'ctx inkwell::context::Context,
   llvm_module: &inkwell::module::Module<'ctx>,
-  source_file_name: String,
-  source_file_contents: &String,
+  source_file: (String, &String),
   build_arg_matches: &clap::ArgMatches<'_>,
 ) -> Vec<gecko::diagnostic::Diagnostic> {
-  let tokens_result = gecko::lexer::Lexer::from_str(source_file_contents).lex_all();
+  let tokens_result = gecko::lexer::Lexer::from_str(source_file.1).lex_all();
 
   // TODO: Can't lexing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
   if let Err(diagnostic) = tokens_result {
@@ -95,7 +92,7 @@ pub fn build_single_file<'ctx>(
     // Do not attempt to lower if there were any errors.
     if !error_encountered {
       let mut llvm_generator =
-        gecko::llvm_lowering::LlvmGenerator::new(source_file_name, llvm_context, &llvm_module);
+        gecko::llvm_lowering::LlvmGenerator::new(source_file.0, llvm_context, &llvm_module);
 
       for top_level_node in top_level_nodes {
         top_level_node.lower(&mut llvm_generator, &mut context);
@@ -104,7 +101,7 @@ pub fn build_single_file<'ctx>(
 
     // TODO: Collect lowering diagnostics if any? There are none right now.
   }
-  
+
   diagnostics
 }
 
@@ -140,8 +137,7 @@ pub fn build_package<'a>(
     let build_diagnostics = build_single_file(
       &llvm_context,
       &llvm_module,
-      source_file_name,
-      &source_file_contents,
+      (source_file_name, &source_file_contents),
       &build_arg_matches,
     );
 
@@ -187,6 +183,8 @@ pub fn build_package<'a>(
   let mut output_file_path = std::path::PathBuf::from(package_manifest.name.clone());
 
   output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);
+
+  // Verify that the produced LLVM IR is well-formed (including all functions).
   assert!(llvm_module.verify().is_ok());
 
   Ok((llvm_module.print_to_string().to_string(), output_file_path))

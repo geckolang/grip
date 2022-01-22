@@ -296,21 +296,20 @@ async fn main() {
       return;
     }
 
+    let source_file_name = source_file_path
+      .file_stem()
+      .unwrap()
+      .to_string_lossy()
+      .to_string();
+
     let source_file_contents = source_file_contents_result.unwrap();
 
     // TODO: File names need to conform to identifier rules.
 
-    let build_diagnostics = build::build_single_file(
-      &llvm_context,
-      &llvm_module,
-      source_file_path
-        .file_stem()
-        .unwrap()
-        .to_string_lossy()
-        .to_string(),
-      &source_file_contents,
-      &matches,
-    );
+    let source_file = (source_file_name, &source_file_contents);
+
+    let build_diagnostics =
+      build::build_single_file(&llvm_context, &llvm_module, source_file, &matches);
 
     // TODO: What if its just non-erroneous diagnostics?
     if !build_diagnostics.is_empty() {
