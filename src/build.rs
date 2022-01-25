@@ -21,11 +21,11 @@ pub fn build_single_file<'ctx>(
   }
 
   // Filter tokens to only include those that are relevant (ignore whitespace, comments, etc.).
-  let tokens: Vec<gecko::token::Token> = tokens_result
+  let tokens: Vec<gecko::lexer::Token> = tokens_result
     .unwrap()
     .into_iter()
     .filter(|token| match token.0 {
-      gecko::token::TokenKind::Whitespace(_) | gecko::token::TokenKind::Comment(_) => false,
+      gecko::lexer::TokenKind::Whitespace(_) | gecko::lexer::TokenKind::Comment(_) => false,
       _ => true,
     })
     .collect();
@@ -35,8 +35,8 @@ pub fn build_single_file<'ctx>(
     println!("tokens: {:?}\n\n", tokens.clone());
   }
 
-  let mut context = gecko::context::Context::new();
-  let mut parser = gecko::parser::Parser::new(tokens, &mut context);
+  let mut cache = gecko::cache::Cache::new();
+  let mut parser = gecko::parser::Parser::new(tokens, &mut cache);
   let top_level_nodes_result = parser.parse_all();
 
   // TODO: Can't parsing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
@@ -49,11 +49,11 @@ pub fn build_single_file<'ctx>(
   let mut name_resolver = gecko::name_resolution::NameResolver::new();
 
   for top_level_node in &mut top_level_nodes {
-    top_level_node.declare(&mut name_resolver, &mut context);
+    top_level_node.declare(&mut name_resolver, &mut cache);
   }
 
   for top_level_node in &mut top_level_nodes {
-    top_level_node.resolve(&mut name_resolver, &mut context);
+    top_level_node.resolve(&mut name_resolver, &mut cache);
   }
 
   diagnostics.extend::<Vec<_>>(name_resolver.diagnostics.into());
@@ -69,7 +69,7 @@ pub fn build_single_file<'ctx>(
 
     // Perform type-checking.
     for top_level_node in &mut top_level_nodes {
-      top_level_node.type_check(&mut type_context, &mut context);
+      top_level_node.type_check(&mut type_context, &mut cache);
     }
 
     diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
@@ -78,10 +78,10 @@ pub fn build_single_file<'ctx>(
 
     // Perform linting.
     for top_level_node in &mut top_level_nodes {
-      top_level_node.lint(&mut context, &mut lint_context);
+      top_level_node.lint(&mut cache, &mut lint_context);
     }
 
-    lint_context.finalize(&context);
+    lint_context.finalize(&cache);
     diagnostics.extend::<Vec<_>>(lint_context.diagnostics.into());
 
     error_encountered = diagnostics
@@ -95,7 +95,7 @@ pub fn build_single_file<'ctx>(
         gecko::llvm_lowering::LlvmGenerator::new(source_file.0, llvm_context, &llvm_module);
 
       for top_level_node in top_level_nodes {
-        top_level_node.lower(&mut llvm_generator, &mut context);
+        top_level_node.lower(&mut llvm_generator, &mut cache);
       }
     }
 
