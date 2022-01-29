@@ -24,9 +24,11 @@ pub fn build_single_file<'ctx>(
   let tokens: Vec<gecko::lexer::Token> = tokens_result
     .unwrap()
     .into_iter()
-    .filter(|token| match token.0 {
-      gecko::lexer::TokenKind::Whitespace(_) | gecko::lexer::TokenKind::Comment(_) => false,
-      _ => true,
+    .filter(|token| {
+      !matches!(
+        token.0,
+        gecko::lexer::TokenKind::Whitespace(_) | gecko::lexer::TokenKind::Comment(_)
+      )
     })
     .collect();
 
@@ -185,7 +187,7 @@ pub fn build_package<'a>(
   output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);
 
   // Verify that the produced LLVM IR is well-formed (including all functions).
-  assert!(llvm_module.verify().is_ok());
+  // assert!(llvm_module.verify().is_ok());
 
   Ok((llvm_module.print_to_string().to_string(), output_file_path))
 }
