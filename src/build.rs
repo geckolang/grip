@@ -1,7 +1,7 @@
 use crate::package;
 use gecko::lint::Lint;
 use gecko::llvm_lowering::Lower;
-use gecko::name_resolution::Resolvable;
+use gecko::name_resolution::Resolve;
 use gecko::type_check::TypeCheck;
 use std::str::FromStr;
 
