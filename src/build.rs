@@ -7,11 +7,150 @@ use std::str::FromStr;
 
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
+/// Serves as the driver for the Gecko compiler.
+///
+/// Can be used to compile a single file, or multiple, and produce
+/// a single LLVM module.
+pub struct ProjectBuilder<'a, 'ctx> {
+  pub source_files: Vec<std::path::PathBuf>,
+  pub llvm_module: &'a inkwell::module::Module<'ctx>,
+  cache: gecko::cache::Cache,
+  name_resolver: gecko::name_resolution::NameResolver,
+  lint_context: gecko::lint::LintContext,
+  type_context: gecko::type_check::TypeCheckContext,
+  llvm_generator: gecko::llvm_lowering::LlvmGenerator<'a, 'ctx>,
+}
+
+impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
+  pub fn new(
+    llvm_context: &'ctx inkwell::context::Context,
+    llvm_module: &'a inkwell::module::Module<'ctx>,
+    project_name: String,
+  ) -> Self {
+    Self {
+      source_files: Vec::new(),
+      llvm_module,
+      cache: gecko::cache::Cache::new(),
+      name_resolver: gecko::name_resolution::NameResolver::new(),
+      lint_context: gecko::lint::LintContext::new(),
+      type_context: gecko::type_check::TypeCheckContext::new(),
+      llvm_generator: gecko::llvm_lowering::LlvmGenerator::new(
+        project_name,
+        llvm_context,
+        &llvm_module,
+      ),
+    }
+  }
+
+  fn read_and_lex(&self, source_file: &std::path::PathBuf) -> Vec<gecko::lexer::Token> {
+    // FIXME: Performing unsafe operations temporarily.
+
+    let source_code = package::fetch_source_file_contents(&source_file).unwrap();
+    let tokens = gecko::lexer::Lexer::from_str(source_code.as_str()).lex_all();
+
+    // FIXME: What about illegal tokens?
+    // TODO: This might be inefficient for larger programs, so consider passing an option to the lexer.
+    // Filter tokens to only include those that are relevant (ignore whitespace, comments, etc.).
+    tokens
+      .unwrap()
+      .into_iter()
+      .filter(|token| {
+        !matches!(
+          token.0,
+          gecko::lexer::TokenKind::Whitespace(_) | gecko::lexer::TokenKind::Comment(_)
+        )
+      })
+      .collect()
+  }
+
+  pub fn compile(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
+    // FIXME: May be too complex (too many loops). Find a way to simplify the loops?
+
+    let mut ast = std::collections::HashMap::new();
+    let mut diagnostics = Vec::new();
+
+    // Read, lex, parse, perform name resolution (declarations)
+    // and collect the AST (top-level nodes) from each source file.
+    for source_file in &self.source_files {
+      let tokens = self.read_and_lex(source_file);
+      let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
+
+      // FIXME: Unsafe unwrapping.
+      let mut top_level_nodes = parser.parse_all().unwrap();
+
+      // TODO: File names need to conform to identifier rules.
+      let source_file_name = source_file
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+      self.name_resolver.create_module(source_file_name.clone());
+
+      for top_level_node in &mut top_level_nodes {
+        top_level_node.declare(&mut self.name_resolver, &mut self.cache);
+      }
+
+      ast.insert(source_file_name, top_level_nodes);
+    }
+
+    diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
+
+    // Cannot continue to other phases if name resolution failed.
+    for diagnostic in &diagnostics {
+      if diagnostic.is_error_like() {
+        return diagnostics;
+      }
+    }
+
+    // After all the ASTs have been collected, perform actual name resolution.
+    for (module_name, inner_ast) in &mut ast {
+      self.name_resolver.set_active_module(module_name.clone());
+
+      for top_level_node in inner_ast {
+        top_level_node.resolve(&mut self.name_resolver, &mut self.cache);
+      }
+    }
+
+    // Once symbols are resolved, we can proceed to the other phases.
+    for inner_ast in ast.values_mut() {
+      for top_level_node in inner_ast {
+        top_level_node.type_check(&mut self.type_context, &mut self.cache);
+
+        // TODO: Can we mix linting with type-checking without any problems?
+        top_level_node.lint(&mut self.cache, &mut self.lint_context);
+      }
+    }
+
+    // TODO: Any way for better efficiency (less loops)?
+    // Lowering cannot proceed if there was an error.
+    for diagnostic in &diagnostics {
+      if diagnostic.is_error_like() {
+        return diagnostics;
+      }
+    }
+
+    // Once symbols are resolved, we can proceed to the other phases.
+    for (_, inner_ast) in &mut ast {
+      for top_level_node in inner_ast {
+        top_level_node.lower(&mut self.llvm_generator, &mut self.cache);
+      }
+    }
+
+    diagnostics.extend(self.type_context.diagnostic_builder.diagnostics.clone());
+    diagnostics.extend(self.lint_context.diagnostic_builder.diagnostics.clone());
+
+    // TODO: We should have diagnostics ordered/sorted (by severity then phase).
+    diagnostics
+  }
+}
+
 pub fn build_single_file<'ctx>(
-  llvm_context: &'ctx inkwell::context::Context,
-  llvm_module: &inkwell::module::Module<'ctx>,
   source_file: (String, &String),
   build_arg_matches: &clap::ArgMatches<'_>,
+  name_resolver: &mut gecko::name_resolution::NameResolver,
+  lint_context: &mut gecko::lint::LintContext,
+  llvm_generator: &mut gecko::llvm_lowering::LlvmGenerator<'_, 'ctx>,
 ) -> Vec<gecko::diagnostic::Diagnostic> {
   let tokens_result = gecko::lexer::Lexer::from_str(source_file.1).lex_all();
 
@@ -47,18 +186,17 @@ pub fn build_single_file<'ctx>(
   }
 
   let mut top_level_nodes = top_level_nodes_result.unwrap();
-  let mut diagnostics = Vec::new();
-  let mut name_resolver = gecko::name_resolution::NameResolver::new();
 
   for top_level_node in &mut top_level_nodes {
-    top_level_node.declare(&mut name_resolver, &mut cache);
+    top_level_node.declare(name_resolver, &mut cache);
   }
 
   for top_level_node in &mut top_level_nodes {
-    top_level_node.resolve(&mut name_resolver, &mut cache);
+    top_level_node.resolve(name_resolver, &mut cache);
   }
 
-  diagnostics.extend::<Vec<_>>(name_resolver.diagnostics.into());
+  let mut diagnostics: Vec<gecko::diagnostic::Diagnostic> =
+    lint_context.diagnostic_builder.diagnostics.clone();
 
   let mut error_encountered = diagnostics
     .iter()
@@ -74,17 +212,16 @@ pub fn build_single_file<'ctx>(
       top_level_node.type_check(&mut type_context, &mut cache);
     }
 
-    diagnostics.extend::<Vec<_>>(type_context.diagnostics.into());
-
-    let mut lint_context = gecko::lint::LintContext::new();
+    diagnostics.extend::<Vec<_>>(type_context.diagnostic_builder.into());
 
     // Perform linting.
     for top_level_node in &mut top_level_nodes {
-      top_level_node.lint(&mut cache, &mut lint_context);
+      top_level_node.lint(&mut cache, lint_context);
     }
 
+    // TODO: Ensure this doesn't affect multiple files.
     lint_context.finalize(&cache);
-    diagnostics.extend::<Vec<_>>(lint_context.diagnostics.into());
+    diagnostics.extend::<Vec<_>>(lint_context.diagnostic_builder.diagnostics.clone());
 
     error_encountered = diagnostics
       .iter()
@@ -93,11 +230,8 @@ pub fn build_single_file<'ctx>(
 
     // Do not attempt to lower if there were any errors.
     if !error_encountered {
-      let mut llvm_generator =
-        gecko::llvm_lowering::LlvmGenerator::new(source_file.0, llvm_context, &llvm_module);
-
       for top_level_node in top_level_nodes {
-        top_level_node.lower(&mut llvm_generator, &mut cache);
+        top_level_node.lower(llvm_generator, &mut cache);
       }
     }
 
@@ -127,20 +261,39 @@ pub fn build_package<'a>(
       .template("building: {msg} [{bar:15}] {pos}/{len} {elapsed_precise}"),
   );
 
-  for path in source_directories {
+  let mut name_resolver = gecko::name_resolution::NameResolver::new();
+  let mut lint_context = gecko::lint::LintContext::new();
+
+  let mut llvm_generator =
+    gecko::llvm_lowering::LlvmGenerator::new("test".to_string(), llvm_context, &llvm_module);
+
+  // FIXME: First we must run name resolution for all the files, then proceed to the other phases.
+
+  // for source_file_path in source_directories {
+  //   for top_level_node in &mut top_level_nodes {
+  //     top_level_node.declare(name_resolver, &mut cache);
+  //   }
+  // }
+
+  for source_file_path in source_directories {
     // TODO: File names need to conform to identifier rules.
-    let source_file_name = path.file_stem().unwrap().to_string_lossy().to_string();
+    let source_file_name = source_file_path
+      .file_stem()
+      .unwrap()
+      .to_string_lossy()
+      .to_string();
 
     progress_bar.set_message(format!("{}", source_file_name));
 
     // TODO: Clear progress bar on error.
-    let source_file_contents = package::fetch_source_file_contents(&path)?;
+    let source_file_contents = package::fetch_source_file_contents(&source_file_path)?;
 
     let build_diagnostics = build_single_file(
-      &llvm_context,
-      &llvm_module,
       (source_file_name, &source_file_contents),
       &build_arg_matches,
+      &mut name_resolver,
+      &mut lint_context,
+      &mut llvm_generator,
     );
 
     if !build_diagnostics.is_empty() {
@@ -150,7 +303,10 @@ pub fn build_package<'a>(
         // TODO: Maybe fix this by clearing then re-writing the progress bar.
         // FIXME: This will interfere with the progress bar (leave it behind).
         crate::console::print_diagnostic(
-          vec![(&path.to_str().unwrap().to_string(), &source_file_contents)],
+          vec![(
+            &source_file_path.to_str().unwrap().to_string(),
+            &source_file_contents,
+          )],
           &diagnostic,
         );
 
@@ -187,7 +343,7 @@ pub fn build_package<'a>(
   output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);
 
   // Verify that the produced LLVM IR is well-formed (including all functions).
-  // assert!(llvm_module.verify().is_ok());
+  assert!(llvm_module.verify().is_ok());
 
   Ok((llvm_module.print_to_string().to_string(), output_file_path))
 }

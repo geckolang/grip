@@ -2,15 +2,19 @@
 
 use futures_util::StreamExt;
 use std::io::Write;
+use std::str::FromStr;
 
 mod build;
 mod console;
 mod package;
 
 const ARG_FILE: &str = "file";
+// TODO: Consider replacing this to a "lex" subcommand.
 const ARG_LIST_TOKENS: &str = "tokens";
 const ARG_BUILD: &str = "build";
 const ARG_BUILD_PRINT_OUTPUT: &str = "print";
+const ARG_BUILD_NO_VERIFY: &str = "no-verify";
+const ARG_BUILD_OPT: &str = "opt";
 const ARG_INIT: &str = "init";
 const ARG_INIT_NAME: &str = "name";
 const ARG_INIT_FORCE: &str = "force";
@@ -18,6 +22,8 @@ const ARG_INSTALL: &str = "install";
 const ARG_INSTALL_PATH: &str = "repository-path";
 const ARG_INSTALL_BRANCH: &str = "branch";
 const ARG_CHECK: &str = "check";
+const ARG_CLEAN: &str = "clean";
+const ARG_RUN: &str = "run";
 const DEFAULT_SOURCES_DIR: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
@@ -35,48 +41,53 @@ async fn main() {
         .index(1),
     )
     .subcommand(
-      clap::SubCommand::with_name(ARG_BUILD)
-        .about("Build the project in the current directory")
-        .arg(
-          clap::Arg::with_name(ARG_LIST_TOKENS)
-            .short("t")
-            .long(ARG_LIST_TOKENS)
-            .help("Display a list of the lexed tokens"),
-        )
-        .arg(
-          clap::Arg::with_name(ARG_BUILD_PRINT_OUTPUT)
-            .short("p")
-            .long(ARG_BUILD_PRINT_OUTPUT)
-            .help("Print the resulting LLVM IR instead of producing an output file"),
-        )
+    clap::SubCommand::with_name(ARG_BUILD)
+      .about("Build the project in the current directory")
+      .arg(
+        clap::Arg::with_name(ARG_LIST_TOKENS)
+          .short("t")
+          .long(ARG_LIST_TOKENS)
+          .help("Display a list of the lexed tokens"),
+      )
+      .arg(
+        clap::Arg::with_name(ARG_BUILD_PRINT_OUTPUT)
+          .short("p")
+          .long(ARG_BUILD_PRINT_OUTPUT)
+          .help("Print the resulting LLVM IR instead of producing an output file"),
+      )
+      .arg(clap::Arg::with_name(ARG_BUILD_NO_VERIFY).short("v").long(ARG_BUILD_NO_VERIFY).help("Skip LLVM IR verification"))
+      .arg(clap::Arg::with_name(ARG_BUILD_OPT).short("O").long(ARG_BUILD_OPT).help("Specify the optimization level of the produced LLVM IR")),
     )
     .subcommand(
-      clap::SubCommand::with_name(ARG_INIT)
-        .about("Initialize a default package manifest file in the current directory")
-        .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project").index(1))
-        .arg(
-          clap::Arg::with_name(ARG_INIT_FORCE)
-            .help("Reinitialize an existing package manifest file if applicable")
-            .short("f")
-            .long(ARG_INIT_FORCE),
-        ),
+    clap::SubCommand::with_name(ARG_INIT)
+      .about("Initialize a default package manifest file in the current directory")
+      .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project").index(1))
+      .arg(
+        clap::Arg::with_name(ARG_INIT_FORCE)
+          .help("Reinitialize an existing package manifest file if applicable")
+          .short("f")
+          .long(ARG_INIT_FORCE),
+      ),
     )
     .subcommand(
-      clap::SubCommand::with_name(ARG_INSTALL)
-        .about("Install a package from a GitHub repository")
-        .arg(
-          clap::Arg::with_name(ARG_INSTALL_PATH)
-            .index(1)
-            .help("The GitHub repository path where the package lives, in the following format: `user/repository` or `organization/repository`"),
-        )
-        .arg(
-          clap::Arg::with_name(ARG_INSTALL_BRANCH)
-            .help("The GitHub repository's branch to use")
-            .short("b")
-            .long(ARG_INSTALL_BRANCH)
-            .default_value("master"),
-        ),
-    ).subcommand(clap::SubCommand::with_name(ARG_CHECK).about("Perform type-checking only upon the project"));
+    clap::SubCommand::with_name(ARG_INSTALL)
+      .about("Install a package from a GitHub repository")
+      .arg(
+        clap::Arg::with_name(ARG_INSTALL_PATH)
+          .index(1)
+          .help("The GitHub repository path where the package lives, in the following format: `user/repository` or `organization/repository`"),
+      )
+      .arg(
+        clap::Arg::with_name(ARG_INSTALL_BRANCH)
+          .help("The GitHub repository's branch to use")
+          .short("b")
+          .long(ARG_INSTALL_BRANCH)
+          .default_value("master"),
+      ),
+    )
+    .subcommand(clap::SubCommand::with_name(ARG_CHECK).about("Perform type-checking only"))
+    .subcommand(clap::SubCommand::with_name(ARG_CLEAN).about("Clean the build directory and any produced artifacts"))
+    .subcommand(clap::SubCommand::with_name(ARG_RUN).about("Build and execute the project"));
 
   let matches = app.get_matches();
   let llvm_context = inkwell::context::Context::create();
@@ -93,21 +104,50 @@ async fn main() {
   if let Some(init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
     package::init_manifest(&init_arg_matches);
   } else if let Some(build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    let build_result = build::build_package(&llvm_context, &build_arg_matches);
+    let llvm_module = llvm_context.create_module("pending_project_name");
 
-    if let Ok(build_result_tuple) = build_result {
-      let mut final_output_path = std::path::PathBuf::from(DEFAULT_OUTPUT_DIR);
+    let mut project_builder = build::ProjectBuilder::new(
+      &llvm_context,
+      &llvm_module,
+      "pending_project_name".to_string(),
+    );
 
-      final_output_path.push(build_result_tuple.1);
+    // FIXME: Unsafe unwrapping.
+    let source_directories =
+      package::read_sources_dir(&std::path::PathBuf::from_str(crate::DEFAULT_SOURCES_DIR).unwrap())
+        .unwrap();
 
-      print_or_write_output(
-        build_result_tuple.0,
-        &final_output_path,
-        build_arg_matches.is_present(ARG_BUILD_PRINT_OUTPUT),
-      );
-    } else {
-      return;
+    for source_file in source_directories {
+      project_builder.source_files.push(source_file);
     }
+
+    let diagnostics = project_builder.compile();
+
+    for diagnostic in diagnostics {
+      // TODO: Maybe fix this by clearing then re-writing the progress bar.
+      // FIXME: This will interfere with the progress bar (leave it behind).
+      crate::console::print_diagnostic(
+        vec![(
+          // TODO:
+          &"source_file_path_here_pending".to_string(),
+          // FIXME:
+          &"source_file_path_contents_here_pending".to_string(),
+        )],
+        &diagnostic,
+      );
+    }
+
+    let llvm_ir = project_builder.llvm_module.print_to_string().to_string();
+    let mut output_path = std::path::PathBuf::from(DEFAULT_OUTPUT_DIR);
+
+    // TODO:
+    output_path.push(std::path::PathBuf::from("pending_project_name.ll"));
+
+    if let Err(error) = std::fs::write(output_path, llvm_ir) {
+      log::error!("failed to write output file: {}", error);
+    }
+
+    return;
   } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
     // TODO: Implement.
     todo!();
@@ -307,9 +347,19 @@ async fn main() {
     // TODO: File names need to conform to identifier rules.
 
     let source_file = (source_file_name, &source_file_contents);
+    let mut name_resolver = gecko::name_resolution::NameResolver::new();
+    let mut lint_context = gecko::lint::LintContext::new();
 
-    let build_diagnostics =
-      build::build_single_file(&llvm_context, &llvm_module, source_file, &matches);
+    let mut llvm_generator =
+      gecko::llvm_lowering::LlvmGenerator::new(source_file.0.clone(), &llvm_context, &llvm_module);
+
+    let build_diagnostics = build::build_single_file(
+      source_file,
+      &matches,
+      &mut name_resolver,
+      &mut lint_context,
+      &mut llvm_generator,
+    );
 
     // TODO: What if its just non-erroneous diagnostics?
     if !build_diagnostics.is_empty() {
