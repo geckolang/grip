@@ -104,13 +104,18 @@ async fn main() {
   if let Some(init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
     package::init_manifest(&init_arg_matches);
   } else if let Some(build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    let llvm_module = llvm_context.create_module("pending_project_name");
+    let package_manifest_result = package::read_manifest();
 
-    let mut project_builder = build::ProjectBuilder::new(
-      &llvm_context,
-      &llvm_module,
-      "pending_project_name".to_string(),
-    );
+    // TODO: Better error handling?
+    if let Err(error_message) = package_manifest_result {
+      eprintln!("{}", error_message);
+
+      return;
+    }
+
+    let package_manifest = package_manifest_result.unwrap();
+    let llvm_module = llvm_context.create_module(package_manifest.name.as_str());
+    let mut project_builder = build::ProjectBuilder::new(&llvm_context, &llvm_module);
 
     // FIXME: Unsafe unwrapping.
     let source_directories =
@@ -349,9 +354,9 @@ async fn main() {
     let source_file = (source_file_name, &source_file_contents);
     let mut name_resolver = gecko::name_resolution::NameResolver::new();
     let mut lint_context = gecko::lint::LintContext::new();
+    let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(&llvm_context, &llvm_module);
 
-    let mut llvm_generator =
-      gecko::llvm_lowering::LlvmGenerator::new(source_file.0.clone(), &llvm_context, &llvm_module);
+    // TODO: Name the module.
 
     let build_diagnostics = build::build_single_file(
       source_file,
@@ -398,8 +403,7 @@ async fn main() {
 // TODO: Consider expanding this function (or re-structuring it).
 fn print_or_write_output(output: String, output_file_path: &std::path::PathBuf, print: bool) {
   if print {
-    // NOTE: The newline is to separate from the build completion message.
-    print!("\n{}", output);
+    println!("{}", output);
   } else if let Err(error) = std::fs::write(output_file_path, output) {
     log::error!("failed to write output file: {}", error);
   }

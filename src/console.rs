@@ -10,6 +10,7 @@ impl log::Log for Logger {
   fn log(&self, record: &log::Record<'_>) {
     if self.enabled(record.metadata()) {
       // TODO: Use lighter colors.
+      // TODO: There is an extra newline at the end of the message. Is this causing it?
 
       println!(
         // TODO: Width not working because of the color codes.

@@ -25,7 +25,6 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
   pub fn new(
     llvm_context: &'ctx inkwell::context::Context,
     llvm_module: &'a inkwell::module::Module<'ctx>,
-    project_name: String,
   ) -> Self {
     Self {
       source_files: Vec::new(),
@@ -34,11 +33,7 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       name_resolver: gecko::name_resolution::NameResolver::new(),
       lint_context: gecko::lint::LintContext::new(),
       type_context: gecko::type_check::TypeCheckContext::new(),
-      llvm_generator: gecko::llvm_lowering::LlvmGenerator::new(
-        project_name,
-        llvm_context,
-        &llvm_module,
-      ),
+      llvm_generator: gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module),
     }
   }
 
@@ -75,8 +70,10 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       let tokens = self.read_and_lex(source_file);
       let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
 
-      // FIXME: Unsafe unwrapping.
-      let mut top_level_nodes = parser.parse_all().unwrap();
+      let mut top_level_nodes = match parser.parse_all() {
+        Ok(nodes) => nodes,
+        Err(diagnostic) => return vec![diagnostic],
+      };
 
       // TODO: File names need to conform to identifier rules.
       let source_file_name = source_file
@@ -94,15 +91,6 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       ast.insert(source_file_name, top_level_nodes);
     }
 
-    diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
-
-    // Cannot continue to other phases if name resolution failed.
-    for diagnostic in &diagnostics {
-      if diagnostic.is_error_like() {
-        return diagnostics;
-      }
-    }
-
     // After all the ASTs have been collected, perform actual name resolution.
     for (module_name, inner_ast) in &mut ast {
       self.name_resolver.set_active_module(module_name.clone());
@@ -110,6 +98,13 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       for top_level_node in inner_ast {
         top_level_node.resolve(&mut self.name_resolver, &mut self.cache);
       }
+    }
+
+    diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
+
+    // Cannot continue to other phases if name resolution failed.
+    if diagnostics.iter().find(|x| x.is_error_like()).is_some() {
+      return diagnostics;
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
@@ -124,14 +119,14 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
 
     // TODO: Any way for better efficiency (less loops)?
     // Lowering cannot proceed if there was an error.
-    for diagnostic in &diagnostics {
-      if diagnostic.is_error_like() {
-        return diagnostics;
-      }
+    if diagnostics.iter().find(|x| x.is_error_like()).is_some() {
+      return diagnostics;
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
-    for (_, inner_ast) in &mut ast {
+    for (module_name, inner_ast) in &mut ast {
+      self.llvm_generator.module_name = module_name.clone();
+
       for top_level_node in inner_ast {
         top_level_node.lower(&mut self.llvm_generator, &mut self.cache);
       }
@@ -264,8 +259,7 @@ pub fn build_package<'a>(
   let mut name_resolver = gecko::name_resolution::NameResolver::new();
   let mut lint_context = gecko::lint::LintContext::new();
 
-  let mut llvm_generator =
-    gecko::llvm_lowering::LlvmGenerator::new("test".to_string(), llvm_context, &llvm_module);
+  let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module);
 
   // FIXME: First we must run name resolution for all the files, then proceed to the other phases.
 
