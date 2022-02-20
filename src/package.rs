@@ -2,7 +2,7 @@ pub const PATH_MANIFEST_FILE: &str = "grip.toml";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct PackageManifest {
+pub struct Manifest {
   pub name: String,
   pub version: String,
 }
@@ -28,16 +28,16 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
     return false;
   }
 
-  let default_package_manifest = toml::ser::to_string_pretty(&PackageManifest {
+  let default_manifest = toml::ser::to_string_pretty(&Manifest {
     name: String::from(matches.value_of(crate::ARG_INIT_NAME).unwrap()),
     version: String::from("0.0.1"),
   });
 
-  if let Err(error) = default_package_manifest {
+  if let Err(error) = default_manifest {
     log::error!("failed to stringify default package manifest: {}", error);
 
     return false;
-  } else if let Err(error) = std::fs::write(manifest_file_path, default_package_manifest.unwrap()) {
+  } else if let Err(error) = std::fs::write(manifest_file_path, default_manifest.unwrap()) {
     log::error!("failed to write default package manifest file: {}", error);
 
     return false;
@@ -57,39 +57,38 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
   true
 }
 
-pub fn fetch_source_file_contents(source_file_path: &std::path::PathBuf) -> Result<String, String> {
-  if !source_file_path.is_file() {
+pub fn fetch_file_contents(file_path: &std::path::PathBuf) -> Result<String, String> {
+  if !file_path.is_file() {
     return Err(String::from(
       "path does not exist, is not a file, or is inaccessible",
     ));
   }
 
-  let source_file_contents = std::fs::read_to_string(source_file_path.clone());
+  let read_result = std::fs::read_to_string(file_path);
 
-  if source_file_contents.is_err() {
+  if read_result.is_err() {
     return Err(String::from(
       "path does not exist or its contents are not valid utf-8",
     ));
   }
 
-  Ok(source_file_contents.unwrap())
+  Ok(read_result.unwrap())
 }
 
-pub fn read_manifest() -> Result<PackageManifest, String> {
-  let manifest_file_contents_result = std::fs::read_to_string(PATH_MANIFEST_FILE);
+pub fn fetch_manifest() -> Result<Manifest, String> {
+  let manifest_read_result = std::fs::read_to_string(PATH_MANIFEST_FILE);
 
-  if let Err(error) = manifest_file_contents_result {
+  if let Err(error) = manifest_read_result {
     return Err(format!("failed to read package manifest file: {}", error));
   }
 
-  let package_manifest_result =
-    toml::from_str::<PackageManifest>(manifest_file_contents_result.unwrap().as_str());
+  let manifest_result = toml::from_str::<Manifest>(manifest_read_result.unwrap().as_str());
 
-  if let Err(error) = package_manifest_result {
+  if let Err(error) = manifest_result {
     return Err(format!("failed to parse package manifest file: {}", error));
   }
 
-  Ok(package_manifest_result.unwrap())
+  Ok(manifest_result.unwrap())
 }
 
 pub fn read_sources_dir(

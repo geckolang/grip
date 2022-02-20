@@ -3,7 +3,6 @@ use gecko::lint::Lint;
 use gecko::llvm_lowering::Lower;
 use gecko::name_resolution::Resolve;
 use gecko::type_check::TypeCheck;
-use std::str::FromStr;
 
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
@@ -11,8 +10,9 @@ pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 ///
 /// Can be used to compile a single file, or multiple, and produce
 /// a single LLVM module.
-pub struct ProjectBuilder<'a, 'ctx> {
+pub struct Driver<'a, 'ctx> {
   pub source_files: Vec<std::path::PathBuf>,
+  pub file_contents: std::collections::HashMap<std::path::PathBuf, String>,
   pub llvm_module: &'a inkwell::module::Module<'ctx>,
   cache: gecko::cache::Cache,
   name_resolver: gecko::name_resolution::NameResolver,
@@ -21,13 +21,14 @@ pub struct ProjectBuilder<'a, 'ctx> {
   llvm_generator: gecko::llvm_lowering::LlvmGenerator<'a, 'ctx>,
 }
 
-impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
+impl<'a, 'ctx> Driver<'a, 'ctx> {
   pub fn new(
     llvm_context: &'ctx inkwell::context::Context,
     llvm_module: &'a inkwell::module::Module<'ctx>,
   ) -> Self {
     Self {
       source_files: Vec::new(),
+      file_contents: std::collections::HashMap::new(),
       llvm_module,
       cache: gecko::cache::Cache::new(),
       name_resolver: gecko::name_resolution::NameResolver::new(),
@@ -40,7 +41,7 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
   fn read_and_lex(&self, source_file: &std::path::PathBuf) -> Vec<gecko::lexer::Token> {
     // FIXME: Performing unsafe operations temporarily.
 
-    let source_code = package::fetch_source_file_contents(&source_file).unwrap();
+    let source_code = package::fetch_file_contents(&source_file).unwrap();
     let tokens = gecko::lexer::Lexer::from_str(source_code.as_str()).lex_all();
 
     // FIXME: What about illegal tokens?
@@ -58,7 +59,7 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       .collect()
   }
 
-  pub fn compile(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
+  pub fn build(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
     // FIXME: May be too complex (too many loops). Find a way to simplify the loops?
 
     let mut ast = std::collections::HashMap::new();
@@ -96,19 +97,25 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       self.name_resolver.set_active_module(module_name.clone());
 
       for top_level_node in inner_ast {
-        top_level_node.resolve(&mut self.name_resolver, &mut self.cache);
+        top_level_node.resolve(&mut self.name_resolver);
       }
     }
 
     diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
 
     // Cannot continue to other phases if name resolution failed.
-    if diagnostics.iter().find(|x| x.is_error_like()).is_some() {
+    if diagnostics.iter().any(|x| x.is_error_like()) {
       return diagnostics;
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
     for inner_ast in ast.values_mut() {
+      for top_level_node in inner_ast {
+        top_level_node.post_resolve(&mut self.name_resolver, &mut self.cache);
+      }
+    }
+
+    for inner_ast in ast.values() {
       for top_level_node in inner_ast {
         top_level_node.type_check(&mut self.type_context, &mut self.cache);
 
@@ -117,9 +124,12 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
       }
     }
 
+    diagnostics.extend(self.type_context.diagnostic_builder.diagnostics.clone());
+    diagnostics.extend(self.lint_context.diagnostic_builder.diagnostics.clone());
+
     // TODO: Any way for better efficiency (less loops)?
     // Lowering cannot proceed if there was an error.
-    if diagnostics.iter().find(|x| x.is_error_like()).is_some() {
+    if diagnostics.iter().any(|x| x.is_error_like()) {
       return diagnostics;
     }
 
@@ -131,9 +141,6 @@ impl<'a, 'ctx> ProjectBuilder<'a, 'ctx> {
         top_level_node.lower(&mut self.llvm_generator, &mut self.cache);
       }
     }
-
-    diagnostics.extend(self.type_context.diagnostic_builder.diagnostics.clone());
-    diagnostics.extend(self.lint_context.diagnostic_builder.diagnostics.clone());
 
     // TODO: We should have diagnostics ordered/sorted (by severity then phase).
     diagnostics
@@ -187,7 +194,7 @@ pub fn build_single_file<'ctx>(
   }
 
   for top_level_node in &mut top_level_nodes {
-    top_level_node.resolve(name_resolver, &mut cache);
+    top_level_node.resolve(name_resolver);
   }
 
   let mut diagnostics: Vec<gecko::diagnostic::Diagnostic> =
@@ -234,110 +241,4 @@ pub fn build_single_file<'ctx>(
   }
 
   diagnostics
-}
-
-pub fn build_package<'a>(
-  llvm_context: &'a inkwell::context::Context,
-  build_arg_matches: &clap::ArgMatches<'_>,
-) -> Result<(String, std::path::PathBuf), String> {
-  let package_manifest = package::read_manifest()?;
-
-  let source_directories =
-    package::read_sources_dir(&std::path::PathBuf::from_str(crate::DEFAULT_SOURCES_DIR).unwrap())?;
-
-  let llvm_module =
-      // TODO: Prefer usage of `.file_prefix()` once it is stable.
-      llvm_context.create_module(package_manifest.name.as_str());
-
-  let progress_bar = indicatif::ProgressBar::new(source_directories.len() as u64);
-
-  progress_bar.set_style(
-    indicatif::ProgressStyle::default_bar()
-      .template("building: {msg} [{bar:15}] {pos}/{len} {elapsed_precise}"),
-  );
-
-  let mut name_resolver = gecko::name_resolution::NameResolver::new();
-  let mut lint_context = gecko::lint::LintContext::new();
-
-  let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module);
-
-  // FIXME: First we must run name resolution for all the files, then proceed to the other phases.
-
-  // for source_file_path in source_directories {
-  //   for top_level_node in &mut top_level_nodes {
-  //     top_level_node.declare(name_resolver, &mut cache);
-  //   }
-  // }
-
-  for source_file_path in source_directories {
-    // TODO: File names need to conform to identifier rules.
-    let source_file_name = source_file_path
-      .file_stem()
-      .unwrap()
-      .to_string_lossy()
-      .to_string();
-
-    progress_bar.set_message(format!("{}", source_file_name));
-
-    // TODO: Clear progress bar on error.
-    let source_file_contents = package::fetch_source_file_contents(&source_file_path)?;
-
-    let build_diagnostics = build_single_file(
-      (source_file_name, &source_file_contents),
-      &build_arg_matches,
-      &mut name_resolver,
-      &mut lint_context,
-      &mut llvm_generator,
-    );
-
-    if !build_diagnostics.is_empty() {
-      let mut error_encountered = false;
-
-      for diagnostic in build_diagnostics {
-        // TODO: Maybe fix this by clearing then re-writing the progress bar.
-        // FIXME: This will interfere with the progress bar (leave it behind).
-        crate::console::print_diagnostic(
-          vec![(
-            &source_file_path.to_str().unwrap().to_string(),
-            &source_file_contents,
-          )],
-          &diagnostic,
-        );
-
-        if diagnostic.is_error_like() {
-          error_encountered = true;
-        }
-      }
-
-      if error_encountered {
-        // TODO: Maybe fix this by clearing then re-writing the progress bar.
-        // FIXME: This will interfere with the progress bar (leave it behind).
-        return Err(format!(
-          "failed to build package `{}` due to previous error(s)",
-          package_manifest.name
-        ));
-      }
-    }
-
-    progress_bar.inc(1);
-  }
-
-  progress_bar.finish_and_clear();
-
-  // TODO: In the future, use the appropriate time unit (min, sec, etc.) instead of just `s`.
-  log::info!(
-    "built package `{}` in {}s",
-    package_manifest.name,
-    progress_bar.elapsed().as_secs()
-  );
-
-  // TODO: Should the output file's path be handled here?
-  let mut output_file_path = std::path::PathBuf::from(package_manifest.name.clone());
-
-  output_file_path.set_extension(PATH_OUTPUT_FILE_EXTENSION);
-
-  // Verify that the produced LLVM IR is well-formed (including all functions).
-  assert!(llvm_module.verify().is_ok());
-
-  Ok((llvm_module.print_to_string().to_string(), output_file_path))
 }

@@ -28,94 +28,94 @@ const DEFAULT_SOURCES_DIR: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
 
-#[tokio::main]
-async fn main() {
+async fn run() -> Result<(), String> {
   let app = clap::App::new("Grip")
-    .version(clap::crate_version!())
-    .author(clap::crate_authors!())
-    .about("Package manager & command-line utility for the gecko programming language")
-    // TODO: Make this a positional under the `build` subcommand.
+  .version(clap::crate_version!())
+  .author(clap::crate_authors!())
+  .about("Package manager & command-line utility for the gecko programming language")
+  // TODO: Make this a positional under the `build` subcommand.
+  .arg(
+    clap::Arg::with_name(ARG_FILE)
+      .help("The file to process")
+      .index(1),
+  )
+  .subcommand(
+  clap::SubCommand::with_name(ARG_BUILD)
+    .about("Build the project in the current directory")
     .arg(
-      clap::Arg::with_name(ARG_FILE)
-        .help("The file to process")
-        .index(1),
+      clap::Arg::with_name(ARG_LIST_TOKENS)
+        .short("t")
+        .long(ARG_LIST_TOKENS)
+        .help("Display a list of the lexed tokens"),
     )
-    .subcommand(
-    clap::SubCommand::with_name(ARG_BUILD)
-      .about("Build the project in the current directory")
-      .arg(
-        clap::Arg::with_name(ARG_LIST_TOKENS)
-          .short("t")
-          .long(ARG_LIST_TOKENS)
-          .help("Display a list of the lexed tokens"),
-      )
-      .arg(
-        clap::Arg::with_name(ARG_BUILD_PRINT_OUTPUT)
-          .short("p")
-          .long(ARG_BUILD_PRINT_OUTPUT)
-          .help("Print the resulting LLVM IR instead of producing an output file"),
-      )
-      .arg(clap::Arg::with_name(ARG_BUILD_NO_VERIFY).short("v").long(ARG_BUILD_NO_VERIFY).help("Skip LLVM IR verification"))
-      .arg(clap::Arg::with_name(ARG_BUILD_OPT).short("O").long(ARG_BUILD_OPT).help("Specify the optimization level of the produced LLVM IR")),
+    .arg(
+      clap::Arg::with_name(ARG_BUILD_PRINT_OUTPUT)
+        .short("p")
+        .long(ARG_BUILD_PRINT_OUTPUT)
+        .help("Print the resulting LLVM IR instead of producing an output file"),
     )
-    .subcommand(
-    clap::SubCommand::with_name(ARG_INIT)
-      .about("Initialize a default package manifest file in the current directory")
-      .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project").index(1))
-      .arg(
-        clap::Arg::with_name(ARG_INIT_FORCE)
-          .help("Reinitialize an existing package manifest file if applicable")
-          .short("f")
-          .long(ARG_INIT_FORCE),
-      ),
+    .arg(clap::Arg::with_name(ARG_BUILD_NO_VERIFY).short("v").long(ARG_BUILD_NO_VERIFY).help("Skip LLVM IR verification"))
+    .arg(clap::Arg::with_name(ARG_BUILD_OPT).short("O").long(ARG_BUILD_OPT).help("Specify the optimization level of the produced LLVM IR")),
+  )
+  .subcommand(
+  clap::SubCommand::with_name(ARG_INIT)
+    .about("Initialize a default package manifest file in the current directory")
+    .arg(clap::Arg::with_name(ARG_INIT_NAME).default_value("project").index(1))
+    .arg(
+      clap::Arg::with_name(ARG_INIT_FORCE)
+        .help("Reinitialize an existing package manifest file if applicable")
+        .short("f")
+        .long(ARG_INIT_FORCE),
+    ),
+  )
+  .subcommand(
+  clap::SubCommand::with_name(ARG_INSTALL)
+    .about("Install a package from a GitHub repository")
+    .arg(
+      clap::Arg::with_name(ARG_INSTALL_PATH)
+        .index(1)
+        .help("The GitHub repository path where the package lives, in the following format: `user/repository` or `organization/repository`"),
     )
-    .subcommand(
-    clap::SubCommand::with_name(ARG_INSTALL)
-      .about("Install a package from a GitHub repository")
-      .arg(
-        clap::Arg::with_name(ARG_INSTALL_PATH)
-          .index(1)
-          .help("The GitHub repository path where the package lives, in the following format: `user/repository` or `organization/repository`"),
-      )
-      .arg(
-        clap::Arg::with_name(ARG_INSTALL_BRANCH)
-          .help("The GitHub repository's branch to use")
-          .short("b")
-          .long(ARG_INSTALL_BRANCH)
-          .default_value("master"),
-      ),
-    )
-    .subcommand(clap::SubCommand::with_name(ARG_CHECK).about("Perform type-checking only"))
-    .subcommand(clap::SubCommand::with_name(ARG_CLEAN).about("Clean the build directory and any produced artifacts"))
-    .subcommand(clap::SubCommand::with_name(ARG_RUN).about("Build and execute the project"));
+    .arg(
+      clap::Arg::with_name(ARG_INSTALL_BRANCH)
+        .help("The GitHub repository's branch to use")
+        .short("b")
+        .long(ARG_INSTALL_BRANCH)
+        .default_value("master"),
+    ),
+  )
+  .subcommand(clap::SubCommand::with_name(ARG_CHECK).about("Perform type-checking only"))
+  .subcommand(clap::SubCommand::with_name(ARG_CLEAN).about("Clean the build directory and any produced artifacts"))
+  .subcommand(clap::SubCommand::with_name(ARG_RUN).about("Build and execute the project"));
 
   let matches = app.get_matches();
   let llvm_context = inkwell::context::Context::create();
   let set_logger_result = log::set_logger(&console::LOGGER);
 
   if let Err(error) = set_logger_result {
-    eprintln!("there was an error initializing the logger: {}", error);
-
-    return;
+    return Err(format!(
+      "there was an error initializing the logger: {}",
+      error
+    ));
   }
 
   log::set_max_level(log::LevelFilter::Info);
 
   if let Some(init_arg_matches) = matches.subcommand_matches(ARG_INIT) {
     package::init_manifest(&init_arg_matches);
-  } else if let Some(build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    let package_manifest_result = package::read_manifest();
+
+    Ok(())
+  } else if let Some(_build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
+    let package_manifest_result = package::fetch_manifest();
 
     // TODO: Better error handling?
     if let Err(error_message) = package_manifest_result {
-      eprintln!("{}", error_message);
-
-      return;
+      return Err(error_message);
     }
 
     let package_manifest = package_manifest_result.unwrap();
     let llvm_module = llvm_context.create_module(package_manifest.name.as_str());
-    let mut project_builder = build::ProjectBuilder::new(&llvm_context, &llvm_module);
+    let mut driver = build::Driver::new(&llvm_context, &llvm_module);
 
     // FIXME: Unsafe unwrapping.
     let source_directories =
@@ -123,10 +123,14 @@ async fn main() {
         .unwrap();
 
     for source_file in source_directories {
-      project_builder.source_files.push(source_file);
+      driver.source_files.push(source_file);
     }
 
-    let diagnostics = project_builder.compile();
+    // TODO: Use a map to store the sources, then read it here
+    // and provide it to the project builder to link diagnostics
+    // to specific files (via `(source_file_name, diagnostic)`).
+
+    let diagnostics = driver.build();
 
     for diagnostic in diagnostics {
       // TODO: Maybe fix this by clearing then re-writing the progress bar.
@@ -142,7 +146,9 @@ async fn main() {
       );
     }
 
-    let llvm_ir = project_builder.llvm_module.print_to_string().to_string();
+    llvm_module.set_triple(&inkwell::targets::TargetMachine::get_default_triple());
+
+    let llvm_ir = llvm_module.print_to_string().to_string();
     let mut output_path = std::path::PathBuf::from(DEFAULT_OUTPUT_DIR);
 
     // TODO:
@@ -152,7 +158,7 @@ async fn main() {
       log::error!("failed to write output file: {}", error);
     }
 
-    return;
+    std::process::exit(1);
   } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
     // TODO: Implement.
     todo!();
@@ -173,9 +179,10 @@ async fn main() {
       .await;
 
     if let Err(error) = package_manifest_file_response_result {
-      log::error!("failed to fetching the package manifest file: {}", error);
-
-      return;
+      return Err(format!(
+        "failed to fetching the package manifest file: {}",
+        error
+      ));
     }
 
     let package_manifest_file_response = package_manifest_file_response_result.unwrap();
@@ -183,31 +190,31 @@ async fn main() {
     if package_manifest_file_response.status() == reqwest::StatusCode::NOT_FOUND {
       log::error!("the package manifest file was not found on the requested repository");
 
-      return;
+      std::process::exit(1);
     } else if !package_manifest_file_response.status().is_success() {
-      log::error!(
+      return Err(format!(
         "failed to fetching the package manifest file: HTTP error {}",
         package_manifest_file_response.status()
-      );
-
-      return;
+      ));
     }
 
     let package_manifest_file_text = package_manifest_file_response.text().await;
 
     if let Err(error) = package_manifest_file_text {
-      log::error!("failed to fetching the package manifest file: {}", error);
-
-      return;
+      return Err(format!(
+        "failed to fetching the package manifest file: {}",
+        error
+      ));
     }
 
     let package_manifest_result =
-      toml::from_str::<package::PackageManifest>(package_manifest_file_text.unwrap().as_str());
+      toml::from_str::<package::Manifest>(package_manifest_file_text.unwrap().as_str());
 
     if let Err(error) = package_manifest_result {
-      log::error!("failed to parse the package manifest file: {}", error);
-
-      return;
+      return Err(format!(
+        "failed to parse the package manifest file: {}",
+        error
+      ));
     }
 
     let package_manifest = package_manifest_result.unwrap();
@@ -222,21 +229,17 @@ async fn main() {
         .await;
 
       if let Err(error) = response_result {
-        log::error!("failed to download the package: {}", error);
-
-        return;
+        return Err(format!("failed to download the package: {}", error));
       }
 
       response_result.unwrap()
     };
 
     if !package_zip_file_response.status().is_success() {
-      log::error!(
+      return Err(format!(
         "failed to download the package: HTTP error {}",
         package_zip_file_response.status()
-      );
-
-      return;
+      ));
     }
 
     let file_size = {
@@ -244,9 +247,7 @@ async fn main() {
 
       // FIXME: Getting fragile `failed to download the package: no content length` errors.
       if content_length.is_none() {
-        log::error!("failed to download the package: no content length");
-
-        return;
+        return Err("failed to download the package: no content length".to_string());
       }
 
       content_length.unwrap()
@@ -266,9 +267,10 @@ async fn main() {
 
     if !file_path.exists() {
       if let Err(error) = std::fs::create_dir_all(file_path.clone()) {
-        log::error!("failed to create the dependencies directory: {}", error);
-
-        return;
+        return Err(format!(
+          "failed to create the dependencies directory: {}",
+          error
+        ));
       }
     }
 
@@ -280,12 +282,10 @@ async fn main() {
       if let Err(error) = file_result {
         progress_bar.finish_and_clear();
 
-        log::error!(
+        return Err(format!(
           "failed to create output file for package download: {}",
           error
-        );
-
-        return;
+        ));
       }
 
       file_result.unwrap()
@@ -297,18 +297,16 @@ async fn main() {
     while let Some(chunk_result) = bytes_stream.next().await {
       if let Err(error) = chunk_result {
         progress_bar.finish_and_clear();
-        log::error!("failed to download the package: {}", error);
 
-        return;
+        return Err(format!("failed to download the package: {}", error));
       }
 
       let chunk = chunk_result.unwrap();
 
       if let Err(error) = file.write(&chunk) {
         progress_bar.finish_and_clear();
-        log::error!("failed to write to output file: {}", error);
 
-        return;
+        return Err(format!("failed to write to output file: {}", error));
       }
 
       let new_progress_position = std::cmp::min(downloaded_bytes + (chunk.len() as u64), file_size);
@@ -320,6 +318,8 @@ async fn main() {
     progress_bar.finish_and_clear();
     log::info!("downloaded package `{}`", package_manifest.name);
 
+    Ok(())
+
     // TODO: Continue implementation: unzip and process the downloaded package.
   } else if matches.is_present(ARG_FILE) {
     // TODO: Make this positional under `build` subcommand instead.
@@ -328,17 +328,14 @@ async fn main() {
     let llvm_context = inkwell::context::Context::create();
 
     let llvm_module =
-      // TODO: Need to verify that `source_file_path` is a file path, otherwise `.file_stem()` might return `None`.
-      // TODO: Prefer usage of `.file_prefix()` once it is stable.
-      llvm_context.create_module(source_file_path.file_stem().unwrap().to_str().unwrap());
+    // TODO: Need to verify that `source_file_path` is a file path, otherwise `.file_stem()` might return `None`.
+    // TODO: Prefer usage of `.file_prefix()` once it is stable.
+    llvm_context.create_module(source_file_path.file_stem().unwrap().to_str().unwrap());
 
-    let source_file_contents_result =
-      package::fetch_source_file_contents(&source_file_path.clone());
+    let source_file_contents_result = package::fetch_file_contents(&source_file_path);
 
     if let Err(error) = source_file_contents_result {
-      log::error!("failed to read source file contents: {}", error);
-
-      return;
+      return Err(format!("failed to read source file contents: {}", error));
     }
 
     let source_file_name = source_file_path
@@ -378,7 +375,8 @@ async fn main() {
         );
       }
 
-      return;
+      // TODO: Empty string.
+      return Err(String::default());
     }
 
     let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
@@ -392,11 +390,24 @@ async fn main() {
       &output_file_path,
       false,
     );
+
+    Ok(())
   } else {
     // TODO:
     // clap.Error::with_description("no file specified", clap::ErrorKind::MissingArgument);
-    log::error!("try running `grip --help`");
+    Err("try running `grip --help`".to_string())
     // app.print_long_help();
+  }
+}
+
+#[tokio::main]
+async fn main() {
+  match run().await {
+    Ok(_) => (),
+    Err(error_message) => {
+      log::error!("{}", error_message);
+      std::process::exit(1);
+    }
   }
 }
 

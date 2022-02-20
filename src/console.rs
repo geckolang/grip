@@ -37,7 +37,7 @@ pub fn print_diagnostic(
   diagnostic: &gecko::diagnostic::Diagnostic,
 ) {
   let writer = codespan_reporting::term::termcolor::StandardStream::stderr(
-    codespan_reporting::term::termcolor::ColorChoice::Always,
+    codespan_reporting::term::termcolor::ColorChoice::Auto,
   );
 
   let config = codespan_reporting::term::Config::default();
@@ -52,13 +52,13 @@ pub fn print_diagnostic(
     .with_message(diagnostic.message.clone());
 
   // Display the source (if applicable).
-  if let Some(location) = &diagnostic.location {
+  if let Some(span) = &diagnostic.span {
     // TODO: Is there a need to re-assign here?
     codespan_diagnostic =
       codespan_diagnostic.with_labels(vec![codespan_reporting::diagnostic::Label::primary(
         // FIXME: Temporary value. Need actual file id (is this the index?).
         0,
-        location.clone(),
+        span.clone(),
       )]);
   }
 
