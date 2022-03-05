@@ -60,10 +60,10 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
   }
 
   pub fn build(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
-    // FIXME: May be too complex (too many loops). Find a way to simplify the loops?
+    // FIXME: This function may be too complex (too many loops). Find a way to simplify the loops?
 
-    let mut ast = std::collections::HashMap::new();
     let mut diagnostics = Vec::new();
+    let mut module_map = std::collections::HashMap::new();
 
     // Read, lex, parse, perform name resolution (declarations)
     // and collect the AST (top-level nodes) from each source file.
@@ -71,7 +71,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       let tokens = self.read_and_lex(source_file);
       let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
 
-      let mut top_level_nodes = match parser.parse_all() {
+      let top_level_nodes = match parser.parse_all() {
         Ok(nodes) => nodes,
         Err(diagnostic) => return vec![diagnostic],
       };
@@ -85,20 +85,30 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
       self.name_resolver.create_module(source_file_name.clone());
 
-      for top_level_node in &mut top_level_nodes {
-        top_level_node.declare(&mut self.name_resolver, &mut self.cache);
+      // Give ownership of the top-level nodes to the cache.
+      for top_level_node in top_level_nodes.into_iter() {
+        let unique_id = top_level_node.unique_id.clone();
+
+        self
+          .cache
+          .new_symbol_table
+          .insert(unique_id, top_level_node);
+
+        module_map.insert(unique_id, source_file_name.clone());
       }
 
-      ast.insert(source_file_name, top_level_nodes);
+      for top_level_node in self.cache.new_symbol_table.values() {
+        top_level_node.declare(&mut self.name_resolver, &self.cache);
+      }
     }
 
     // After all the ASTs have been collected, perform actual name resolution.
-    for (module_name, inner_ast) in &mut ast {
-      self.name_resolver.set_active_module(module_name.clone());
+    for (unique_id, top_level_node) in &mut self.cache.new_symbol_table {
+      self
+        .name_resolver
+        .set_active_module(module_map.get(unique_id).unwrap().clone());
 
-      for top_level_node in inner_ast {
-        top_level_node.resolve(&mut self.name_resolver);
-      }
+      top_level_node.resolve(&mut self.name_resolver);
     }
 
     diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
@@ -109,19 +119,11 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
-    for inner_ast in ast.values_mut() {
-      for top_level_node in inner_ast {
-        top_level_node.post_resolve(&mut self.name_resolver, &mut self.cache);
-      }
-    }
+    for top_level_node in self.cache.new_symbol_table.values() {
+      top_level_node.type_check(&mut self.type_context, &self.cache);
 
-    for inner_ast in ast.values() {
-      for top_level_node in inner_ast {
-        top_level_node.type_check(&mut self.type_context, &mut self.cache);
-
-        // TODO: Can we mix linting with type-checking without any problems?
-        top_level_node.lint(&mut self.cache, &mut self.lint_context);
-      }
+      // TODO: Can we mix linting with type-checking without any problems?
+      top_level_node.lint(&self.cache, &mut self.lint_context);
     }
 
     diagnostics.extend(self.type_context.diagnostic_builder.diagnostics.clone());
@@ -134,12 +136,11 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
-    for (module_name, inner_ast) in &mut ast {
-      self.llvm_generator.module_name = module_name.clone();
+    for top_level_node in self.cache.new_symbol_table.values() {
+      // TODO: Unsafe access.
+      self.llvm_generator.module_name = module_map.get(&top_level_node.unique_id).unwrap().clone();
 
-      for top_level_node in inner_ast {
-        top_level_node.lower(&mut self.llvm_generator, &mut self.cache);
-      }
+      top_level_node.lower(&mut self.llvm_generator, &self.cache);
     }
 
     // TODO: We should have diagnostics ordered/sorted (by severity then phase).

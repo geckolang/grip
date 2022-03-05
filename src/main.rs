@@ -8,7 +8,6 @@ mod build;
 mod console;
 mod package;
 
-const ARG_FILE: &str = "file";
 // TODO: Consider replacing this to a "lex" subcommand.
 const ARG_LIST_TOKENS: &str = "tokens";
 const ARG_BUILD: &str = "build";
@@ -33,12 +32,6 @@ async fn run() -> Result<(), String> {
   .version(clap::crate_version!())
   .author(clap::crate_authors!())
   .about("Package manager & command-line utility for the gecko programming language")
-  // TODO: Make this a positional under the `build` subcommand.
-  .arg(
-    clap::Arg::with_name(ARG_FILE)
-      .help("The file to process")
-      .index(1),
-  )
   .subcommand(
   clap::SubCommand::with_name(ARG_BUILD)
     .about("Build the project in the current directory")
@@ -158,7 +151,7 @@ async fn run() -> Result<(), String> {
       log::error!("failed to write output file: {}", error);
     }
 
-    std::process::exit(1);
+    Ok(())
   } else if let Some(_check_arg_matches) = matches.subcommand_matches(ARG_CHECK) {
     // TODO: Implement.
     todo!();
@@ -188,9 +181,9 @@ async fn run() -> Result<(), String> {
     let package_manifest_file_response = package_manifest_file_response_result.unwrap();
 
     if package_manifest_file_response.status() == reqwest::StatusCode::NOT_FOUND {
-      log::error!("the package manifest file was not found on the requested repository");
-
-      std::process::exit(1);
+      return Err(String::from(
+        "the package manifest file was not found on the requested repository",
+      ));
     } else if !package_manifest_file_response.status().is_success() {
       return Err(format!(
         "failed to fetching the package manifest file: HTTP error {}",
@@ -321,77 +314,6 @@ async fn run() -> Result<(), String> {
     Ok(())
 
     // TODO: Continue implementation: unzip and process the downloaded package.
-  } else if matches.is_present(ARG_FILE) {
-    // TODO: Make this positional under `build` subcommand instead.
-
-    let source_file_path = std::path::PathBuf::from(matches.value_of(ARG_FILE).unwrap());
-    let llvm_context = inkwell::context::Context::create();
-
-    let llvm_module =
-    // TODO: Need to verify that `source_file_path` is a file path, otherwise `.file_stem()` might return `None`.
-    // TODO: Prefer usage of `.file_prefix()` once it is stable.
-    llvm_context.create_module(source_file_path.file_stem().unwrap().to_str().unwrap());
-
-    let source_file_contents_result = package::fetch_file_contents(&source_file_path);
-
-    if let Err(error) = source_file_contents_result {
-      return Err(format!("failed to read source file contents: {}", error));
-    }
-
-    let source_file_name = source_file_path
-      .file_stem()
-      .unwrap()
-      .to_string_lossy()
-      .to_string();
-
-    let source_file_contents = source_file_contents_result.unwrap();
-
-    // TODO: File names need to conform to identifier rules.
-
-    let source_file = (source_file_name, &source_file_contents);
-    let mut name_resolver = gecko::name_resolution::NameResolver::new();
-    let mut lint_context = gecko::lint::LintContext::new();
-    let mut llvm_generator = gecko::llvm_lowering::LlvmGenerator::new(&llvm_context, &llvm_module);
-
-    // TODO: Name the module.
-
-    let build_diagnostics = build::build_single_file(
-      source_file,
-      &matches,
-      &mut name_resolver,
-      &mut lint_context,
-      &mut llvm_generator,
-    );
-
-    // TODO: What if its just non-erroneous diagnostics?
-    if !build_diagnostics.is_empty() {
-      for diagnostic in build_diagnostics {
-        console::print_diagnostic(
-          vec![(
-            &source_file_path.clone().to_str().unwrap().to_string(),
-            &source_file_contents,
-          )],
-          &diagnostic,
-        );
-      }
-
-      // TODO: Empty string.
-      return Err(String::default());
-    }
-
-    let mut output_file_path = std::path::PathBuf::from(source_file_path.parent().unwrap());
-
-    output_file_path.push(source_file_path.file_stem().unwrap());
-    output_file_path.set_extension(build::PATH_OUTPUT_FILE_EXTENSION);
-
-    // TODO: Use `ARG_BUILD_PRINT_OUTPUT` after being a positional under `build` subcommand.
-    print_or_write_output(
-      llvm_module.print_to_string().to_string(),
-      &output_file_path,
-      false,
-    );
-
-    Ok(())
   } else {
     // TODO:
     // clap.Error::with_description("no file specified", clap::ErrorKind::MissingArgument);
