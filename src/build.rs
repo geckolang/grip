@@ -2,7 +2,7 @@ use crate::package;
 use gecko::lint::Lint;
 use gecko::llvm_lowering::Lower;
 use gecko::name_resolution::Resolve;
-use gecko::type_check::TypeCheck;
+use gecko::semantic_check::SemanticCheck;
 
 pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
@@ -17,7 +17,7 @@ pub struct Driver<'a, 'ctx> {
   cache: gecko::cache::Cache,
   name_resolver: gecko::name_resolution::NameResolver,
   lint_context: gecko::lint::LintContext,
-  type_context: gecko::type_check::TypeCheckContext,
+  type_context: gecko::semantic_check::SemanticCheckContext,
   llvm_generator: gecko::llvm_lowering::LlvmGenerator<'a, 'ctx>,
 }
 
@@ -33,9 +33,21 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       cache: gecko::cache::Cache::new(),
       name_resolver: gecko::name_resolution::NameResolver::new(),
       lint_context: gecko::lint::LintContext::new(),
-      type_context: gecko::type_check::TypeCheckContext::new(),
+      type_context: gecko::semantic_check::SemanticCheckContext::new(),
       llvm_generator: gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module),
     }
+  }
+
+  /// Attempt to retrieve a node's unique id.
+  ///
+  /// If the node is not a top-level node (a definition), `None` will
+  /// be returned.
+  fn find_unique_id(node: &gecko::ast::Node) -> Option<gecko::cache::UniqueId> {
+    Some(match &node.kind {
+      gecko::ast::NodeKind::Function(function) => function.unique_id,
+      // TODO: Missing cases.
+      _ => return None,
+    })
   }
 
   fn read_and_lex(&self, source_file: &std::path::PathBuf) -> Vec<gecko::lexer::Token> {
@@ -87,7 +99,8 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
       // Give ownership of the top-level nodes to the cache.
       for top_level_node in top_level_nodes.into_iter() {
-        let unique_id = top_level_node.unique_id.clone();
+        // TODO: Unsafe unwrap.
+        let unique_id = Self::find_unique_id(&top_level_node).unwrap();
 
         self
           .cache
@@ -120,7 +133,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
     // Once symbols are resolved, we can proceed to the other phases.
     for top_level_node in self.cache.new_symbol_table.values() {
-      top_level_node.type_check(&mut self.type_context, &self.cache);
+      top_level_node.check(&mut self.type_context, &self.cache);
 
       // TODO: Can we mix linting with type-checking without any problems?
       top_level_node.lint(&self.cache, &mut self.lint_context);
@@ -137,8 +150,12 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
     // Once symbols are resolved, we can proceed to the other phases.
     for top_level_node in self.cache.new_symbol_table.values() {
+      // TODO: Unsafe unwrap.
+      let unique_id = Self::find_unique_id(top_level_node).unwrap();
+
       // TODO: Unsafe access.
-      self.llvm_generator.module_name = module_map.get(&top_level_node.unique_id).unwrap().clone();
+      // TODO: In the future, we need to get rid of the `unique_id` property on `Node`s.
+      self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().clone();
 
       top_level_node.lower(&mut self.llvm_generator, &self.cache);
     }
@@ -208,14 +225,14 @@ pub fn build_single_file<'ctx>(
 
   // Cannot continue to any more phases if name resolution failed.
   if !error_encountered {
-    let mut type_context = gecko::type_check::TypeCheckContext::new();
+    let mut semantic_context = gecko::semantic_check::SemanticCheckContext::new();
 
     // Perform type-checking.
     for top_level_node in &mut top_level_nodes {
-      top_level_node.type_check(&mut type_context, &mut cache);
+      top_level_node.check(&mut semantic_context, &mut cache);
     }
 
-    diagnostics.extend::<Vec<_>>(type_context.diagnostic_builder.into());
+    diagnostics.extend::<Vec<_>>(semantic_context.diagnostic_builder.into());
 
     // Perform linting.
     for top_level_node in &mut top_level_nodes {
