@@ -45,7 +45,12 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
   fn find_unique_id(node: &gecko::ast::Node) -> Option<gecko::cache::UniqueId> {
     Some(match &node.kind {
       gecko::ast::NodeKind::Function(function) => function.unique_id,
-      // TODO: Missing cases.
+      gecko::ast::NodeKind::Enum(enum_) => enum_.unique_id,
+      gecko::ast::NodeKind::StructType(struct_type) => struct_type.unique_id,
+      gecko::ast::NodeKind::TypeAlias(type_alias) => type_alias.unique_id,
+      gecko::ast::NodeKind::ExternFunction(extern_function) => extern_function.unique_id,
+      gecko::ast::NodeKind::ExternStatic(extern_static) => extern_static.unique_id,
+      // TODO: Missing cases?
       _ => return None,
     })
   }
@@ -83,7 +88,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       let tokens = self.read_and_lex(source_file);
       let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
 
-      let top_level_nodes = match parser.parse_all() {
+      let root_nodes = match parser.parse_all() {
         Ok(nodes) => nodes,
         Err(diagnostic) => return vec![diagnostic],
       };
@@ -97,46 +102,47 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
       self.name_resolver.create_module(source_file_name.clone());
 
+      // FIXME: Not only top-level nodes should be registered on the cache. What about parameters?
       // Give ownership of the top-level nodes to the cache.
-      for top_level_node in top_level_nodes.into_iter() {
+      for root_node in root_nodes.into_iter() {
         // TODO: Unsafe unwrap.
-        let unique_id = Self::find_unique_id(&top_level_node).unwrap();
+        let unique_id = Self::find_unique_id(&root_node).unwrap();
 
-        self
-          .cache
-          .new_symbol_table
-          .insert(unique_id, top_level_node);
-
+        self.cache.symbols.insert(unique_id, root_node);
         module_map.insert(unique_id, source_file_name.clone());
       }
 
-      for top_level_node in self.cache.new_symbol_table.values() {
-        top_level_node.declare(&mut self.name_resolver, &self.cache);
+      for root_node in self.cache.symbols.values() {
+        root_node.declare(&mut self.name_resolver, &self.cache);
       }
     }
 
     // After all the ASTs have been collected, perform actual name resolution.
-    for (unique_id, top_level_node) in &mut self.cache.new_symbol_table {
+    for (unique_id, root_node) in &mut self.cache.symbols {
       self
         .name_resolver
         .set_active_module(module_map.get(unique_id).unwrap().clone());
 
-      top_level_node.resolve(&mut self.name_resolver);
+      // FIXME: Resolve method needs cache.
+      root_node.resolve(&mut self.name_resolver);
     }
 
     diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
 
     // Cannot continue to other phases if name resolution failed.
-    if diagnostics.iter().any(|x| x.is_error_like()) {
+    if diagnostics
+      .iter()
+      .any(|diagnostic| diagnostic.is_error_like())
+    {
       return diagnostics;
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
-    for top_level_node in self.cache.new_symbol_table.values() {
-      top_level_node.check(&mut self.type_context, &self.cache);
+    for root_node in self.cache.symbols.values() {
+      root_node.check(&mut self.type_context, &self.cache);
 
       // TODO: Can we mix linting with type-checking without any problems?
-      top_level_node.lint(&self.cache, &mut self.lint_context);
+      root_node.lint(&self.cache, &mut self.lint_context);
     }
 
     diagnostics.extend(self.type_context.diagnostic_builder.diagnostics.clone());
@@ -149,15 +155,15 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     }
 
     // Once symbols are resolved, we can proceed to the other phases.
-    for top_level_node in self.cache.new_symbol_table.values() {
+    for root_node in self.cache.symbols.values() {
       // TODO: Unsafe unwrap.
-      let unique_id = Self::find_unique_id(top_level_node).unwrap();
+      let unique_id = Self::find_unique_id(root_node).unwrap();
 
       // TODO: Unsafe access.
       // TODO: In the future, we need to get rid of the `unique_id` property on `Node`s.
       self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().clone();
 
-      top_level_node.lower(&mut self.llvm_generator, &self.cache);
+      root_node.lower(&mut self.llvm_generator, &self.cache);
     }
 
     // TODO: We should have diagnostics ordered/sorted (by severity then phase).
@@ -198,21 +204,21 @@ pub fn build_single_file<'ctx>(
 
   let mut cache = gecko::cache::Cache::new();
   let mut parser = gecko::parser::Parser::new(tokens, &mut cache);
-  let top_level_nodes_result = parser.parse_all();
+  let root_nodes_result = parser.parse_all();
 
   // TODO: Can't parsing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
-  if let Err(diagnostic) = top_level_nodes_result {
+  if let Err(diagnostic) = root_nodes_result {
     return vec![diagnostic];
   }
 
-  let mut top_level_nodes = top_level_nodes_result.unwrap();
+  let mut root_nodes = root_nodes_result.unwrap();
 
-  for top_level_node in &mut top_level_nodes {
-    top_level_node.declare(name_resolver, &mut cache);
+  for root_node in &mut root_nodes {
+    root_node.declare(name_resolver, &mut cache);
   }
 
-  for top_level_node in &mut top_level_nodes {
-    top_level_node.resolve(name_resolver);
+  for root_node in &mut root_nodes {
+    root_node.resolve(name_resolver);
   }
 
   let mut diagnostics: Vec<gecko::diagnostic::Diagnostic> =
@@ -228,15 +234,15 @@ pub fn build_single_file<'ctx>(
     let mut semantic_context = gecko::semantic_check::SemanticCheckContext::new();
 
     // Perform type-checking.
-    for top_level_node in &mut top_level_nodes {
-      top_level_node.check(&mut semantic_context, &mut cache);
+    for root_node in &mut root_nodes {
+      root_node.check(&mut semantic_context, &mut cache);
     }
 
     diagnostics.extend::<Vec<_>>(semantic_context.diagnostic_builder.into());
 
     // Perform linting.
-    for top_level_node in &mut top_level_nodes {
-      top_level_node.lint(&mut cache, lint_context);
+    for root_node in &mut root_nodes {
+      root_node.lint(&mut cache, lint_context);
     }
 
     // TODO: Ensure this doesn't affect multiple files.
@@ -250,8 +256,8 @@ pub fn build_single_file<'ctx>(
 
     // Do not attempt to lower if there were any errors.
     if !error_encountered {
-      for top_level_node in top_level_nodes {
-        top_level_node.lower(llvm_generator, &mut cache);
+      for root_node in root_nodes {
+        root_node.lower(llvm_generator, &mut cache);
       }
     }
 
