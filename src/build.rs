@@ -104,26 +104,24 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
       // FIXME: Not only top-level nodes should be registered on the cache. What about parameters?
       // Give ownership of the top-level nodes to the cache.
-      for root_node in root_nodes.into_iter() {
+      for root_node in root_nodes {
+        root_node.declare(&mut self.name_resolver, &self.cache);
+
         // TODO: Unsafe unwrap.
         let unique_id = Self::find_unique_id(&root_node).unwrap();
 
         self.cache.symbols.insert(unique_id, root_node);
         module_map.insert(unique_id, source_file_name.clone());
       }
-
-      for root_node in self.cache.symbols.values() {
-        root_node.declare(&mut self.name_resolver, &self.cache);
-      }
     }
 
-    // After all the ASTs have been collected, perform actual name resolution.
+    // After all the ASTs have been collected, perform name resolution.
     for (unique_id, root_node) in &mut self.cache.symbols {
       self
         .name_resolver
         .set_active_module(module_map.get(unique_id).unwrap().clone());
 
-      // FIXME: Resolve method needs cache.
+      // FIXME: Resolve method needs the cache.
       root_node.resolve(&mut self.name_resolver);
     }
 
