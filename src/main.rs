@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 mod build;
 mod console;
+mod dependency;
 mod package;
 
 // TODO: Consider replacing this to a "lex" subcommand.
@@ -99,7 +100,7 @@ async fn run() -> Result<(), String> {
 
     Ok(())
   } else if let Some(_build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    let package_manifest_result = package::fetch_manifest();
+    let package_manifest_result = package::fetch_manifest(&package::PATH_MANIFEST_FILE.into());
 
     // TODO: Better error handling?
     if let Err(error_message) = package_manifest_result {

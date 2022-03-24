@@ -1,10 +1,12 @@
 pub const PATH_MANIFEST_FILE: &str = "grip.toml";
+pub const PATH_DEPENDENCIES: &str = "dependencies";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Manifest {
   pub name: String,
   pub version: String,
+  pub dependencies: Vec<String>,
 }
 
 // TODO: Make use of return value.
@@ -31,6 +33,7 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
   let default_manifest = toml::ser::to_string_pretty(&Manifest {
     name: String::from(matches.value_of(crate::ARG_INIT_NAME).unwrap()),
     version: String::from("0.0.1"),
+    dependencies: Vec::new(),
   });
 
   if let Err(error) = default_manifest {
@@ -75,8 +78,8 @@ pub fn fetch_file_contents(file_path: &std::path::PathBuf) -> Result<String, Str
   Ok(read_result.unwrap())
 }
 
-pub fn fetch_manifest() -> Result<Manifest, String> {
-  let manifest_read_result = std::fs::read_to_string(PATH_MANIFEST_FILE);
+pub fn fetch_manifest(path: &std::path::PathBuf) -> Result<Manifest, String> {
+  let manifest_read_result = std::fs::read_to_string(path);
 
   if let Err(error) = manifest_read_result {
     return Err(format!("failed to read package manifest file: {}", error));

@@ -47,7 +47,6 @@ pub fn print_diagnostic(
     codespan_reporting::diagnostic::Diagnostic::new(match diagnostic.severity {
       gecko::diagnostic::Severity::Error => codespan_reporting::diagnostic::Severity::Error,
       gecko::diagnostic::Severity::Warning => codespan_reporting::diagnostic::Severity::Warning,
-      gecko::diagnostic::Severity::Internal => codespan_reporting::diagnostic::Severity::Bug,
     })
     .with_message(diagnostic.message.clone());
 
@@ -60,12 +59,6 @@ pub fn print_diagnostic(
         0,
         span.clone(),
       )]);
-  }
-
-  if diagnostic.severity == gecko::diagnostic::Severity::Internal {
-    codespan_diagnostic
-      .notes
-      .push("please report this to the compiler team".into());
   }
 
   for file in files {
