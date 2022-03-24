@@ -139,6 +139,16 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       return diagnostics;
     }
 
+    // REVIEW: There might be room for improvement here, since we're just repeating
+    // ... this resolution step for the cached AST, which can be costly. But then again,
+    // ... we still have a whole cloned AST.
+    // Once the AST has been resolved, follow up by resolving the cached AST.
+    // Since they're both structurally equivalent, we shouldn't be worried of
+    // any produced diagnostics from this step.
+    for cached_root_node in self.cache.symbols.values_mut() {
+      cached_root_node.resolve(&mut self.name_resolver);
+    }
+
     // Once symbols are resolved, we can proceed to the other phases.
     for root_node in &ast {
       root_node.check(&mut self.type_context, &self.cache);
