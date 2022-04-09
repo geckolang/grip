@@ -1,8 +1,8 @@
 #![deny(rust_2018_idioms)]
 
 use futures_util::StreamExt;
-use std::io::Write;
-use std::str::FromStr;
+use std::{collections::vec_deque, str::FromStr};
+use std::{collections::vec_deque::VecDeque, io::Write};
 
 mod build;
 mod console;
@@ -24,7 +24,7 @@ const ARG_INSTALL_BRANCH: &str = "branch";
 const ARG_CHECK: &str = "check";
 const ARG_CLEAN: &str = "clean";
 const ARG_RUN: &str = "run";
-const DEFAULT_SOURCES_DIR: &str = "src";
+const PATH_SOURCES: &str = "src";
 const DEFAULT_OUTPUT_DIR: &str = "build";
 const PATH_DEPENDENCIES: &str = "dependencies";
 
@@ -100,24 +100,42 @@ async fn run() -> Result<(), String> {
 
     Ok(())
   } else if let Some(_build_arg_matches) = matches.subcommand_matches(ARG_BUILD) {
-    let package_manifest_result = package::fetch_manifest(&package::PATH_MANIFEST_FILE.into());
-
-    // TODO: Better error handling?
-    if let Err(error_message) = package_manifest_result {
-      return Err(error_message);
-    }
-
-    let package_manifest = package_manifest_result.unwrap();
+    let package_manifest = package::fetch_manifest(&package::PATH_MANIFEST_FILE.into())?;
+    let package_lock = package::get_or_init_package_lock()?;
     let llvm_module = llvm_context.create_module(package_manifest.name.as_str());
     let mut driver = build::Driver::new(&llvm_context, &llvm_module);
+    let mut build_queue = std::collections::VecDeque::new();
+    let mut is_initial_package = true;
 
-    // FIXME: Unsafe unwrapping.
-    let source_directories =
-      package::read_sources_dir(&std::path::PathBuf::from_str(crate::DEFAULT_SOURCES_DIR).unwrap())
-        .unwrap();
+    build_queue.push_front(package_manifest.clone());
 
-    for source_file in source_directories {
-      driver.source_files.push(source_file);
+    while let Some(package) = build_queue.pop_front() {
+      let sources_dir = if is_initial_package {
+        let result = std::path::PathBuf::from(PATH_SOURCES);
+
+        is_initial_package = false;
+
+        result
+      } else {
+        std::path::PathBuf::from(package::PATH_DEPENDENCIES)
+          .join(package.name)
+          .join(PATH_SOURCES)
+      };
+
+      let source_directories = package::read_sources_dir(&sources_dir)?;
+
+      // TODO: Shouldn't these source files be saved under a package (HashMap)?
+      for source_file in source_directories {
+        driver.source_files.push(source_file);
+      }
+
+      // TODO: Handle cyclic dependencies.
+      // Add dependencies to build queue.
+      for dependency in &package.dependencies {
+        let dependency_manifest = package::fetch_dependency_manifest(dependency)?;
+
+        build_queue.push_front(dependency_manifest);
+      }
     }
 
     // TODO: Use a map to store the sources, then read it here

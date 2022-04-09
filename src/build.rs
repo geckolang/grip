@@ -42,14 +42,14 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
   ///
   /// If the node is not a top-level node (a definition), `None` will
   /// be returned.
-  fn find_unique_id(node: &gecko::ast::Node) -> Option<gecko::cache::UniqueId> {
+  fn find_unique_id(node: &gecko::ast::Node) -> Option<gecko::cache::BindingId> {
     Some(match &node.kind {
-      gecko::ast::NodeKind::Function(function) => function.unique_id,
-      gecko::ast::NodeKind::Enum(enum_) => enum_.unique_id,
-      gecko::ast::NodeKind::StructType(struct_type) => struct_type.unique_id,
-      gecko::ast::NodeKind::TypeAlias(type_alias) => type_alias.unique_id,
-      gecko::ast::NodeKind::ExternFunction(extern_function) => extern_function.unique_id,
-      gecko::ast::NodeKind::ExternStatic(extern_static) => extern_static.unique_id,
+      gecko::ast::NodeKind::Function(function) => function.binding_id,
+      gecko::ast::NodeKind::Enum(enum_) => enum_.binding_id,
+      gecko::ast::NodeKind::StructType(struct_type) => struct_type.binding_id,
+      gecko::ast::NodeKind::TypeAlias(type_alias) => type_alias.binding_id,
+      gecko::ast::NodeKind::ExternFunction(extern_function) => extern_function.binding_id,
+      gecko::ast::NodeKind::ExternStatic(extern_static) => extern_static.binding_id,
       // REVIEW: Missing cases?
       _ => return None,
     })
@@ -61,6 +61,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     let source_code = package::fetch_file_contents(&source_file).unwrap();
     let tokens = gecko::lexer::Lexer::from_str(source_code.as_str()).lex_all();
 
+    // BUG: This will fail if there were lexing errors. Unsafe unwrap.
     // FIXME: What about illegal tokens?
     // TODO: This might be inefficient for larger programs, so consider passing an option to the lexer.
     // Filter tokens to only include those that are relevant (ignore whitespace, comments, etc.).
@@ -108,7 +109,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       // FIXME: Not only top-level nodes should be registered on the cache. What about parameters?
       // Give ownership of the top-level nodes to the cache.
       for root_node in &root_nodes {
-        root_node.declare(&mut self.name_resolver, &mut self.cache);
+        root_node.declare(&mut self.name_resolver);
 
         // REVISE: Unsafe unwrap.
         let unique_id = Self::find_unique_id(&root_node).unwrap();
@@ -126,7 +127,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       //   .name_resolver
       //   .set_active_module(module_map.get(unique_id).unwrap().clone());
 
-      root_node.resolve(&mut self.name_resolver);
+      root_node.resolve(&mut self.name_resolver, &mut self.cache);
     }
 
     diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
@@ -139,18 +140,13 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       return diagnostics;
     }
 
-    // REVIEW: There might be room for improvement here, since we're just repeating
-    // ... this resolution step for the cached AST, which can be costly. But then again,
-    // ... we still have a whole cloned AST.
-    // Once the AST has been resolved, follow up by resolving the cached AST.
-    // Since they're both structurally equivalent, we shouldn't be worried of
-    // any produced diagnostics from this step.
-    for cached_root_node in self.cache.symbols.values_mut() {
-      cached_root_node.resolve(&mut self.name_resolver);
-    }
+    let readonly_ast = ast
+      .into_iter()
+      .map(|node| std::rc::Rc::new(node))
+      .collect::<Vec<_>>();
 
     // Once symbols are resolved, we can proceed to the other phases.
-    for root_node in &ast {
+    for root_node in &readonly_ast {
       root_node.check(&mut self.type_context, &self.cache);
 
       // TODO: Can we mix linting with type-checking without any problems?
@@ -169,16 +165,30 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       return diagnostics;
     }
 
+    // REVISE: For efficiency, and to solve caching issues, only lower the `main` function here.
+    // ... Any referenced entity within it (thus the whole program) will be lowered and cached
+    // ... accordingly from there on.
+    // BUG: Extern functions shouldn't be lowered directly. They are no longer under a wrapper
+    // ... node, which ensures their caching. This means that, first they will be forcefully lowered
+    // ... here (without caching), then when referenced, since they haven't been cached.
     // Once symbols are resolved, we can proceed to the other phases.
-    for root_node in ast {
-      // TODO: Unsafe unwrap.
-      let unique_id = Self::find_unique_id(&root_node).unwrap();
+    for root_node in &readonly_ast {
+      if let gecko::ast::NodeKind::Function(function) = &root_node.kind {
+        // Only lower the main function.
+        if function.name == gecko::llvm_lowering::MAIN_FUNCTION_NAME {
+          // TODO: Unsafe unwrap.
+          let unique_id = Self::find_unique_id(&root_node).unwrap();
 
-      // TODO: Unsafe access.
-      // TODO: In the future, we need to get rid of the `unique_id` property on `Node`s.
-      self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().clone();
+          // TODO: Unsafe access.
+          // TODO: In the future, we need to get rid of the `unique_id` property on `Node`s.
+          self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().clone();
 
-      root_node.lower(&mut self.llvm_generator, &self.cache);
+          root_node.lower(&mut self.llvm_generator, &self.cache);
+
+          // TODO: Need to manually cache the main function here. This is because
+          // ... if it is called once again, since it isn't cached, it will be re-lowered.
+        }
+      }
     }
 
     // TODO: We should have diagnostics ordered/sorted (by severity then phase).
@@ -229,11 +239,11 @@ pub fn build_single_file<'ctx>(
   let mut root_nodes = root_nodes_result.unwrap();
 
   for root_node in &mut root_nodes {
-    root_node.declare(name_resolver, &mut cache);
+    root_node.declare(name_resolver);
   }
 
   for root_node in &mut root_nodes {
-    root_node.resolve(name_resolver);
+    root_node.resolve(name_resolver, &mut cache);
   }
 
   let mut diagnostics: Vec<gecko::diagnostic::Diagnostic> =

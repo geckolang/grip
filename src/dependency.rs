@@ -1,5 +1,3 @@
-use std::collections::vec_deque;
-
 use crate::package;
 
 type DependencyGraph = std::collections::HashMap<String, Vec<String>>;

@@ -1,12 +1,18 @@
 pub const PATH_MANIFEST_FILE: &str = "grip.toml";
 pub const PATH_DEPENDENCIES: &str = "dependencies";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
+const PATH_PACKAGE_LOCK: &str = "grip.lock";
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Manifest {
   pub name: String,
   pub version: String,
   pub dependencies: Vec<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PackageLock {
+  pub built_dependencies: Vec<String>,
 }
 
 // TODO: Make use of return value.
@@ -20,7 +26,7 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
     return false;
   }
 
-  if std::fs::create_dir(crate::DEFAULT_SOURCES_DIR).is_err() {
+  if std::fs::create_dir(crate::PATH_SOURCES).is_err() {
     log::error!("failed to create sources directory");
 
     return false;
@@ -60,6 +66,36 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
   true
 }
 
+pub fn get_or_init_package_lock() -> Result<PackageLock, String> {
+  let package_lock_path = std::path::Path::new(PATH_PACKAGE_LOCK);
+
+  if !package_lock_path.exists() {
+    let default_package_lock = toml::ser::to_string_pretty(&PackageLock {
+      built_dependencies: Vec::new(),
+    });
+
+    if let Err(error) = default_package_lock {
+      return Err(format!(
+        "failed to stringify default package lock: {}",
+        error
+      ));
+    } else if let Err(error) = std::fs::write(PATH_PACKAGE_LOCK, default_package_lock.unwrap()) {
+      return Err(format!(
+        "failed to write default package manifest file: {}",
+        error
+      ));
+    }
+  }
+
+  let package_lock_contents = fetch_file_contents(&std::path::PathBuf::from(PATH_PACKAGE_LOCK))?;
+
+  if let Ok(package_lock) = toml::from_str(&package_lock_contents) {
+    Ok(package_lock)
+  } else {
+    Err("failed to parse package lock".to_string())
+  }
+}
+
 pub fn fetch_file_contents(file_path: &std::path::PathBuf) -> Result<String, String> {
   if !file_path.is_file() {
     return Err(String::from(
@@ -92,6 +128,14 @@ pub fn fetch_manifest(path: &std::path::PathBuf) -> Result<Manifest, String> {
   }
 
   Ok(manifest_result.unwrap())
+}
+
+pub fn fetch_dependency_manifest(name: &str) -> Result<Manifest, String> {
+  let dependency_manifest_path = std::path::PathBuf::from(PATH_DEPENDENCIES)
+    .join(name)
+    .join(PATH_MANIFEST_FILE);
+
+  fetch_manifest(&dependency_manifest_path)
 }
 
 pub fn read_sources_dir(
