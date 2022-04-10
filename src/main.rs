@@ -110,6 +110,10 @@ async fn run() -> Result<(), String> {
     build_queue.push_front(package_manifest.clone());
 
     while let Some(package) = build_queue.pop_front() {
+      if package.ty == package::PackageType::Executable && !is_initial_package {
+        return Err("dependency is an executable, but was expected to be a library".to_string());
+      }
+
       let sources_dir = if is_initial_package {
         let result = std::path::PathBuf::from(PATH_SOURCES);
 

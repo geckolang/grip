@@ -3,9 +3,19 @@ pub const PATH_DEPENDENCIES: &str = "dependencies";
 const PATH_SOURCE_FILE_EXTENSION: &str = "ko";
 const PATH_PACKAGE_LOCK: &str = "grip.lock";
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+pub enum PackageType {
+  #[serde(rename = "library")]
+  Library,
+  #[serde(rename = "executable")]
+  Executable,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Manifest {
   pub name: String,
+  #[serde(rename = "type")]
+  pub ty: PackageType,
   pub version: String,
   pub dependencies: Vec<String>,
 }
@@ -38,6 +48,7 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
 
   let default_manifest = toml::ser::to_string_pretty(&Manifest {
     name: String::from(matches.value_of(crate::ARG_INIT_NAME).unwrap()),
+    ty: PackageType::Executable,
     version: String::from("0.0.1"),
     dependencies: Vec::new(),
   });

@@ -109,8 +109,6 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       // FIXME: Not only top-level nodes should be registered on the cache. What about parameters?
       // Give ownership of the top-level nodes to the cache.
       for root_node in &root_nodes {
-        root_node.declare(&mut self.name_resolver);
-
         // REVISE: Unsafe unwrap.
         let unique_id = Self::find_unique_id(&root_node).unwrap();
 
@@ -122,15 +120,25 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
     // After all the ASTs have been collected, perform name resolution.
     for root_node in &mut ast {
-      // TODO:
-      // self
-      //   .name_resolver
-      //   .set_active_module(module_map.get(unique_id).unwrap().clone());
+      let unique_id = Self::find_unique_id(&root_node).unwrap();
 
-      root_node.resolve(&mut self.name_resolver, &mut self.cache);
+      // TODO: Move this logic to `NameResolution.run()`.
+      self
+        .name_resolver
+        .set_active_module(module_map.get(&unique_id).unwrap().clone());
+
+      // root_node.resolve(&mut self.name_resolver, &mut self.cache);
     }
 
-    diagnostics.extend(self.name_resolver.diagnostic_builder.diagnostics.clone());
+    diagnostics.extend(self.name_resolver.run(&mut ast, &mut self.cache));
+
+    if self.cache.main_function_id.is_none() {
+      diagnostics.push(gecko::diagnostic::Diagnostic {
+        severity: gecko::diagnostic::Severity::Error,
+        message: "no main function defined".to_string(),
+        span: None,
+      });
+    }
 
     // Cannot continue to other phases if name resolution failed.
     if diagnostics
@@ -153,7 +161,14 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       root_node.lint(&self.cache, &mut self.lint_context);
     }
 
-    diagnostics.extend(self.type_context.diagnostic_builder.diagnostics.clone());
+    self.lint_context.finalize(&self.cache);
+
+    let semantic_check_result =
+      gecko::semantic_check::SemanticCheckContext::run(&readonly_ast, &self.cache);
+
+    // FIXME: Make use of the returned imports!
+
+    diagnostics.extend(semantic_check_result.0);
     diagnostics.extend(self.lint_context.diagnostic_builder.diagnostics.clone());
 
     // TODO: Any way for better efficiency (less loops)?
@@ -194,98 +209,4 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     // TODO: We should have diagnostics ordered/sorted (by severity then phase).
     diagnostics
   }
-}
-
-pub fn build_single_file<'ctx>(
-  source_file: (String, &String),
-  build_arg_matches: &clap::ArgMatches<'_>,
-  name_resolver: &mut gecko::name_resolution::NameResolver,
-  lint_context: &mut gecko::lint::LintContext,
-  llvm_generator: &mut gecko::llvm_lowering::LlvmGenerator<'_, 'ctx>,
-) -> Vec<gecko::diagnostic::Diagnostic> {
-  let tokens_result = gecko::lexer::Lexer::from_str(source_file.1).lex_all();
-
-  // TODO: Can't lexing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
-  if let Err(diagnostic) = tokens_result {
-    return vec![diagnostic];
-  }
-
-  // Filter tokens to only include those that are relevant (ignore whitespace, comments, etc.).
-  let tokens: Vec<gecko::lexer::Token> = tokens_result
-    .unwrap()
-    .into_iter()
-    .filter(|token| {
-      !matches!(
-        token.0,
-        gecko::lexer::TokenKind::Whitespace(_) | gecko::lexer::TokenKind::Comment(_)
-      )
-    })
-    .collect();
-
-  if build_arg_matches.is_present(crate::ARG_LIST_TOKENS) {
-    // TODO: Better printing.
-    println!("tokens: {:?}\n\n", tokens.clone());
-  }
-
-  let mut cache = gecko::cache::Cache::new();
-  let mut parser = gecko::parser::Parser::new(tokens, &mut cache);
-  let root_nodes_result = parser.parse_all();
-
-  // TODO: Can't parsing report more than a single diagnostic? Also, it needs to be verified that the reported diagnostics are erroneous.
-  if let Err(diagnostic) = root_nodes_result {
-    return vec![diagnostic];
-  }
-
-  let mut root_nodes = root_nodes_result.unwrap();
-
-  for root_node in &mut root_nodes {
-    root_node.declare(name_resolver);
-  }
-
-  for root_node in &mut root_nodes {
-    root_node.resolve(name_resolver, &mut cache);
-  }
-
-  let mut diagnostics: Vec<gecko::diagnostic::Diagnostic> =
-    lint_context.diagnostic_builder.diagnostics.clone();
-
-  let mut error_encountered = diagnostics
-    .iter()
-    .any(|diagnostic| diagnostic.severity == gecko::diagnostic::Severity::Error);
-
-  // Cannot continue to any more phases if name resolution failed.
-  if !error_encountered {
-    let mut semantic_context = gecko::semantic_check::SemanticCheckContext::new();
-
-    // Perform type-checking.
-    for root_node in &mut root_nodes {
-      root_node.check(&mut semantic_context, &mut cache);
-    }
-
-    diagnostics.extend::<Vec<_>>(semantic_context.diagnostic_builder.into());
-
-    // Perform linting.
-    for root_node in &mut root_nodes {
-      root_node.lint(&mut cache, lint_context);
-    }
-
-    // TODO: Ensure this doesn't affect multiple files.
-    lint_context.finalize(&cache);
-    diagnostics.extend::<Vec<_>>(lint_context.diagnostic_builder.diagnostics.clone());
-
-    error_encountered = diagnostics
-      .iter()
-      .any(|diagnostic| diagnostic.severity == gecko::diagnostic::Severity::Error);
-
-    // Do not attempt to lower if there were any errors.
-    if !error_encountered {
-      for root_node in root_nodes {
-        root_node.lower(llvm_generator, &mut cache);
-      }
-    }
-
-    // TODO: Collect lowering diagnostics if any? There are none right now.
-  }
-
-  diagnostics
 }
