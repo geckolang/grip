@@ -11,7 +11,7 @@ pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 /// Can be used to compile a single file, or multiple, and produce
 /// a single LLVM module.
 pub struct Driver<'a, 'ctx> {
-  pub source_files: Vec<std::path::PathBuf>,
+  pub source_files: Vec<(String, std::path::PathBuf)>,
   pub file_contents: std::collections::HashMap<std::path::PathBuf, String>,
   pub llvm_module: &'a inkwell::module::Module<'ctx>,
   cache: gecko::cache::Cache,
@@ -77,6 +77,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       .collect()
   }
 
+  // REVIEW: Consider accepting the source files here? More strict?
   pub fn build(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
     // FIXME: This function may be too complex (too many loops). Find a way to simplify the loops?
 
@@ -84,11 +85,11 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
     // REVISE: Just use `module_map`, but `String -> Vec<Node>` or `Node -> String`.
     let mut module_map = std::collections::HashMap::new();
-    let mut ast = Vec::new();
+    let mut ast = std::collections::HashMap::new();
 
     // Read, lex, parse, perform name resolution (declarations)
     // and collect the AST (top-level nodes) from each source file.
-    for source_file in &self.source_files {
+    for (package_name, source_file) in &self.source_files {
       let tokens = self.read_and_lex(source_file);
       let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
 
@@ -104,7 +105,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
         .to_string_lossy()
         .to_string();
 
-      self.name_resolver.create_module(source_file_name.clone());
+      let global_qualifier = (package_name.clone(), source_file_name.clone());
 
       // FIXME: Not only top-level nodes should be registered on the cache. What about parameters?
       // Give ownership of the top-level nodes to the cache.
@@ -112,24 +113,13 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
         // REVISE: Unsafe unwrap.
         let unique_id = Self::find_unique_id(&root_node).unwrap();
 
-        module_map.insert(unique_id, source_file_name.clone());
+        module_map.insert(unique_id, global_qualifier.clone());
       }
 
-      ast.extend(root_nodes);
+      ast.insert(global_qualifier.clone(), root_nodes);
     }
 
     // After all the ASTs have been collected, perform name resolution.
-    for root_node in &mut ast {
-      let unique_id = Self::find_unique_id(&root_node).unwrap();
-
-      // TODO: Move this logic to `NameResolution.run()`.
-      self
-        .name_resolver
-        .set_active_module(module_map.get(&unique_id).unwrap().clone());
-
-      // root_node.resolve(&mut self.name_resolver, &mut self.cache);
-    }
-
     diagnostics.extend(self.name_resolver.run(&mut ast, &mut self.cache));
 
     if self.cache.main_function_id.is_none() {
@@ -149,6 +139,8 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     }
 
     let readonly_ast = ast
+      .into_values()
+      .flatten()
       .into_iter()
       .map(|node| std::rc::Rc::new(node))
       .collect::<Vec<_>>();
@@ -196,7 +188,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
           // TODO: Unsafe access.
           // TODO: In the future, we need to get rid of the `unique_id` property on `Node`s.
-          self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().clone();
+          self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().1.clone();
 
           root_node.lower(&mut self.llvm_generator, &self.cache);
 

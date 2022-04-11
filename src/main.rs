@@ -122,7 +122,7 @@ async fn run() -> Result<(), String> {
         result
       } else {
         std::path::PathBuf::from(package::PATH_DEPENDENCIES)
-          .join(package.name)
+          .join(package.name.clone())
           .join(PATH_SOURCES)
       };
 
@@ -130,7 +130,9 @@ async fn run() -> Result<(), String> {
 
       // TODO: Shouldn't these source files be saved under a package (HashMap)?
       for source_file in source_directories {
-        driver.source_files.push(source_file);
+        driver
+          .source_files
+          .push((package.name.clone(), source_file));
       }
 
       // TODO: Handle cyclic dependencies.
