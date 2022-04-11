@@ -25,7 +25,7 @@ const ARG_CHECK: &str = "check";
 const ARG_CLEAN: &str = "clean";
 const ARG_RUN: &str = "run";
 const PATH_SOURCES: &str = "src";
-const DEFAULT_OUTPUT_DIR: &str = "build";
+const DEFAULT_OUTPUT_DIR: &str = "./build";
 const PATH_DEPENDENCIES: &str = "dependencies";
 
 async fn run() -> Result<(), String> {
@@ -167,12 +167,15 @@ async fn run() -> Result<(), String> {
     llvm_module.set_triple(&inkwell::targets::TargetMachine::get_default_triple());
 
     let llvm_ir = llvm_module.print_to_string().to_string();
-    let mut output_path = std::path::PathBuf::from(DEFAULT_OUTPUT_DIR);
+    let default_output_path = std::path::PathBuf::from(DEFAULT_OUTPUT_DIR);
+    let mut output_path = default_output_path.clone();
 
-    // TODO:
-    output_path.push(std::path::PathBuf::from("pending_project_name.ll"));
+    output_path.push(package_manifest.name);
+    output_path.set_extension("ll");
 
-    if let Err(error) = std::fs::write(output_path, llvm_ir) {
+    if !default_output_path.exists() && std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR).is_err() {
+      log::error!("failed to create output directory");
+    } else if let Err(error) = std::fs::write(output_path, llvm_ir) {
       log::error!("failed to write output file: {}", error);
     }
 

@@ -40,10 +40,6 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
     log::error!("failed to create sources directory");
 
     return false;
-  } else if std::fs::create_dir(crate::DEFAULT_OUTPUT_DIR).is_err() {
-    log::error!("failed to create output directory");
-
-    return false;
   }
 
   let default_manifest = toml::ser::to_string_pretty(&Manifest {

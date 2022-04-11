@@ -1,10 +1,7 @@
 use crate::package;
 use gecko::lint::Lint;
 use gecko::llvm_lowering::Lower;
-use gecko::name_resolution::Resolve;
 use gecko::semantic_check::SemanticCheck;
-
-pub const PATH_OUTPUT_FILE_EXTENSION: &str = "ll";
 
 /// Serves as the driver for the Gecko compiler.
 ///
@@ -38,23 +35,6 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     }
   }
 
-  /// Attempt to retrieve a node's unique id.
-  ///
-  /// If the node is not a top-level node (a definition), `None` will
-  /// be returned.
-  fn find_unique_id(node: &gecko::ast::Node) -> Option<gecko::cache::BindingId> {
-    Some(match &node.kind {
-      gecko::ast::NodeKind::Function(function) => function.binding_id,
-      gecko::ast::NodeKind::Enum(enum_) => enum_.binding_id,
-      gecko::ast::NodeKind::StructType(struct_type) => struct_type.binding_id,
-      gecko::ast::NodeKind::TypeAlias(type_alias) => type_alias.binding_id,
-      gecko::ast::NodeKind::ExternFunction(extern_function) => extern_function.binding_id,
-      gecko::ast::NodeKind::ExternStatic(extern_static) => extern_static.binding_id,
-      // REVIEW: Missing cases?
-      _ => return None,
-    })
-  }
-
   fn read_and_lex(&self, source_file: &std::path::PathBuf) -> Vec<gecko::lexer::Token> {
     // FIXME: Performing unsafe operations temporarily.
 
@@ -79,12 +59,12 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
   // REVIEW: Consider accepting the source files here? More strict?
   pub fn build(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
+    // FIXME: Must name the LLVM module with the initial package's name.
+    self.llvm_generator.module_name = "my_project".to_string();
+
     // FIXME: This function may be too complex (too many loops). Find a way to simplify the loops?
 
     let mut diagnostics = Vec::new();
-
-    // REVISE: Just use `module_map`, but `String -> Vec<Node>` or `Node -> String`.
-    let mut module_map = std::collections::HashMap::new();
     let mut ast = std::collections::HashMap::new();
 
     // Read, lex, parse, perform name resolution (declarations)
@@ -106,15 +86,6 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
         .to_string();
 
       let global_qualifier = (package_name.clone(), source_file_name.clone());
-
-      // FIXME: Not only top-level nodes should be registered on the cache. What about parameters?
-      // Give ownership of the top-level nodes to the cache.
-      for root_node in &root_nodes {
-        // REVISE: Unsafe unwrap.
-        let unique_id = Self::find_unique_id(&root_node).unwrap();
-
-        module_map.insert(unique_id, global_qualifier.clone());
-      }
 
       ast.insert(global_qualifier.clone(), root_nodes);
     }
@@ -183,13 +154,6 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       if let gecko::ast::NodeKind::Function(function) = &root_node.kind {
         // Only lower the main function.
         if function.name == gecko::llvm_lowering::MAIN_FUNCTION_NAME {
-          // TODO: Unsafe unwrap.
-          let unique_id = Self::find_unique_id(&root_node).unwrap();
-
-          // TODO: Unsafe access.
-          // TODO: In the future, we need to get rid of the `unique_id` property on `Node`s.
-          self.llvm_generator.module_name = module_map.get(&unique_id).unwrap().1.clone();
-
           root_node.lower(&mut self.llvm_generator, &self.cache);
 
           // TODO: Need to manually cache the main function here. This is because
