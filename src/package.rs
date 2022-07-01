@@ -14,6 +14,7 @@ pub enum PackageType {
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Manifest {
   pub name: String,
+  pub entry_file: String,
   #[serde(rename = "type")]
   pub ty: PackageType,
   pub version: String,
@@ -44,6 +45,7 @@ pub fn init_manifest(matches: &clap::ArgMatches<'_>) -> bool {
 
   let default_manifest = toml::ser::to_string_pretty(&Manifest {
     name: String::from(matches.value_of(crate::ARG_INIT_NAME).unwrap()),
+    entry_file: String::from("main"),
     ty: PackageType::Executable,
     version: String::from("0.0.1"),
     dependencies: Vec::new(),

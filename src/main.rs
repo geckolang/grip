@@ -1,8 +1,8 @@
 #![deny(rust_2018_idioms)]
 
+use std::io::Write;
+
 use futures_util::StreamExt;
-use std::{collections::vec_deque, str::FromStr};
-use std::{collections::vec_deque::VecDeque, io::Write};
 
 mod build;
 mod console;

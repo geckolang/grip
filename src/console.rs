@@ -34,7 +34,7 @@ impl log::Log for Logger {
 
 pub fn print_diagnostic(
   files: Vec<(&String, &String)>,
-  diagnostic: &gecko::diagnostic::Diagnostic,
+  diagnostic: &codespan_reporting::diagnostic::Diagnostic<usize>,
 ) {
   let writer = codespan_reporting::term::termcolor::StandardStream::stderr(
     codespan_reporting::term::termcolor::ColorChoice::Auto,
@@ -42,24 +42,7 @@ pub fn print_diagnostic(
 
   let config = codespan_reporting::term::Config::default();
   let mut codespan_files = codespan_reporting::files::SimpleFiles::new();
-
-  let mut codespan_diagnostic =
-    codespan_reporting::diagnostic::Diagnostic::new(match diagnostic.severity {
-      gecko::diagnostic::Severity::Error => codespan_reporting::diagnostic::Severity::Error,
-      gecko::diagnostic::Severity::Warning => codespan_reporting::diagnostic::Severity::Warning,
-    })
-    .with_message(diagnostic.message.clone());
-
-  // Display the source (if applicable).
-  if let Some(span) = &diagnostic.span {
-    // TODO: Is there a need to re-assign here?
-    codespan_diagnostic =
-      codespan_diagnostic.with_labels(vec![codespan_reporting::diagnostic::Label::primary(
-        // FIXME: Temporary value. Need actual file id (is this the index?).
-        0,
-        span.clone(),
-      )]);
-  }
+  let mut final_diagnostic = diagnostic.clone();
 
   for file in files {
     codespan_files.add(file.0, file.1);
@@ -69,7 +52,7 @@ pub fn print_diagnostic(
     &mut writer.lock(),
     &config,
     &codespan_files,
-    &codespan_diagnostic,
+    &final_diagnostic,
   );
 
   if let Err(error) = emit_result {

@@ -28,7 +28,11 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       file_contents: std::collections::HashMap::new(),
       llvm_module,
       cache: gecko::cache::Cache::new(),
-      name_resolver: gecko::name_resolution::NameResolver::new(),
+      // FIXME: Pass the actual expected parameter, instead of this dummy value.
+      name_resolver: gecko::name_resolution::NameResolver::new(gecko::name_resolution::Qualifier {
+        package_name: String::from("pending_package_name"),
+        module_name: String::from("pending_module_name"),
+      }),
       lint_context: gecko::lint::LintContext::new(),
       type_context: gecko::semantic_check::SemanticCheckContext::new(),
       llvm_generator: gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module),
@@ -51,27 +55,28 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       .filter(|token| {
         !matches!(
           token.0,
-          gecko::lexer::TokenKind::Whitespace(_) | gecko::lexer::TokenKind::Comment(_)
+          gecko::lexer::TokenKind::Comment(_) | gecko::lexer::TokenKind::Whitespace(_)
         )
       })
       .collect()
   }
 
   // REVIEW: Consider accepting the source files here? More strict?
-  pub fn build(&mut self) -> Vec<gecko::diagnostic::Diagnostic> {
+  pub fn build(&mut self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
     // FIXME: Must name the LLVM module with the initial package's name.
     self.llvm_generator.module_name = "my_project".to_string();
 
     // FIXME: This function may be too complex (too many loops). Find a way to simplify the loops?
 
     let mut diagnostics = Vec::new();
-    let mut ast = std::collections::HashMap::new();
+    let mut ast_map = std::collections::BTreeMap::new();
 
     // Read, lex, parse, perform name resolution (declarations)
     // and collect the AST (top-level nodes) from each source file.
     for (package_name, source_file) in &self.source_files {
       let tokens = self.read_and_lex(source_file);
-      let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
+      let mut substitution = Vec::new();
+      let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache, &mut substitution);
 
       let root_nodes = match parser.parse_all() {
         Ok(nodes) => nodes,
@@ -85,31 +90,34 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
         .to_string_lossy()
         .to_string();
 
-      let global_qualifier = (package_name.clone(), source_file_name.clone());
-
-      ast.insert(global_qualifier.clone(), root_nodes);
+      ast_map.insert(
+        gecko::name_resolution::Qualifier {
+          package_name: package_name.clone(),
+          module_name: source_file_name.clone(),
+        },
+        root_nodes,
+      );
     }
 
     // After all the ASTs have been collected, perform name resolution.
-    diagnostics.extend(self.name_resolver.run(&mut ast, &mut self.cache));
+    diagnostics.extend(self.name_resolver.run(&mut ast_map, &mut self.cache));
 
     if self.cache.main_function_id.is_none() {
-      diagnostics.push(gecko::diagnostic::Diagnostic {
-        severity: gecko::diagnostic::Severity::Error,
-        message: "no main function defined".to_string(),
-        span: None,
-      });
+      diagnostics.push(
+        codespan_reporting::diagnostic::Diagnostic::error()
+          .with_message("no main function defined"),
+      );
     }
 
     // Cannot continue to other phases if name resolution failed.
     if diagnostics
       .iter()
-      .any(|diagnostic| diagnostic.severity == gecko::diagnostic::Severity::Error)
+      .any(|diagnostic| diagnostic.severity == codespan_reporting::diagnostic::Severity::Error)
     {
       return diagnostics;
     }
 
-    let readonly_ast = ast
+    let readonly_ast = ast_map
       .into_values()
       .flatten()
       .into_iter()
@@ -132,13 +140,13 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     // FIXME: Make use of the returned imports!
 
     diagnostics.extend(semantic_check_result.0);
-    diagnostics.extend(self.lint_context.diagnostic_builder.diagnostics.clone());
+    diagnostics.extend(self.lint_context.diagnostics.clone());
 
     // TODO: Any way for better efficiency (less loops)?
     // Lowering cannot proceed if there was an error.
     if diagnostics
       .iter()
-      .any(|diagnostic| diagnostic.severity == gecko::diagnostic::Severity::Error)
+      .any(|diagnostic| diagnostic.severity == codespan_reporting::diagnostic::Severity::Error)
     {
       return diagnostics;
     }
@@ -154,7 +162,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       if let gecko::ast::NodeKind::Function(function) = &root_node.kind {
         // Only lower the main function.
         if function.name == gecko::llvm_lowering::MAIN_FUNCTION_NAME {
-          root_node.lower(&mut self.llvm_generator, &self.cache);
+          root_node.lower(&mut self.llvm_generator, &self.cache, false);
 
           // TODO: Need to manually cache the main function here. This is because
           // ... if it is called once again, since it isn't cached, it will be re-lowered.
