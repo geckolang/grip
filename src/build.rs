@@ -1,7 +1,5 @@
 use crate::package;
-use gecko::lint::Lint;
-use gecko::llvm_lowering::Lower;
-use gecko::semantic_check::SemanticCheck;
+use gecko::type_system::Check;
 
 /// Serves as the driver for the Gecko compiler.
 ///
@@ -12,10 +10,10 @@ pub struct Driver<'a, 'ctx> {
   pub file_contents: std::collections::HashMap<std::path::PathBuf, String>,
   pub llvm_module: &'a inkwell::module::Module<'ctx>,
   cache: gecko::cache::Cache,
-  name_resolver: gecko::name_resolution::NameResolver,
+  // name_resolver: gecko::name_resolution::NameResolver,
   lint_context: gecko::lint::LintContext,
-  type_context: gecko::semantic_check::SemanticCheckContext,
-  llvm_generator: gecko::llvm_lowering::LlvmGenerator<'a, 'ctx>,
+  type_context: gecko::type_system::TypeContext,
+  // llvm_generator: gecko::lowering::LlvmGenerator<'a, 'ctx>,
 }
 
 impl<'a, 'ctx> Driver<'a, 'ctx> {
@@ -29,13 +27,13 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       llvm_module,
       cache: gecko::cache::Cache::new(),
       // FIXME: Pass the actual expected parameter, instead of this dummy value.
-      name_resolver: gecko::name_resolution::NameResolver::new(gecko::name_resolution::Qualifier {
-        package_name: String::from("pending_package_name"),
-        module_name: String::from("pending_module_name"),
-      }),
+      // name_resolver: gecko::name_resolution::NameResolver::new(gecko::name_resolution::Qualifier {
+      //   package_name: String::from("pending_package_name"),
+      //   module_name: String::from("pending_module_name"),
+      // }),
       lint_context: gecko::lint::LintContext::new(),
-      type_context: gecko::semantic_check::SemanticCheckContext::new(),
-      llvm_generator: gecko::llvm_lowering::LlvmGenerator::new(llvm_context, &llvm_module),
+      type_context: gecko::type_system::TypeContext::new(),
+      // llvm_generator: gecko::lowering::LlvmGenerator::new(llvm_context, &llvm_module),
     }
   }
 
@@ -64,7 +62,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
   // REVIEW: Consider accepting the source files here? More strict?
   pub fn build(&mut self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
     // FIXME: Must name the LLVM module with the initial package's name.
-    self.llvm_generator.module_name = "my_project".to_string();
+    // self.llvm_generator.module_name = "my_project".to_string();
 
     // FIXME: This function may be too complex (too many loops). Find a way to simplify the loops?
 
@@ -75,8 +73,7 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     // and collect the AST (top-level nodes) from each source file.
     for (package_name, source_file) in &self.source_files {
       let tokens = self.read_and_lex(source_file);
-      let mut substitution = Vec::new();
-      let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache, &mut substitution);
+      let mut parser = gecko::parser::Parser::new(tokens, &mut self.cache);
 
       let root_nodes = match parser.parse_all() {
         Ok(nodes) => nodes,
@@ -100,8 +97,9 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     }
 
     // After all the ASTs have been collected, perform name resolution.
-    diagnostics.extend(self.name_resolver.run(&mut ast_map, &mut self.cache));
+    // diagnostics.extend(self.name_resolver.run(&mut ast_map, &mut self.cache));
 
+    // FIXME: This should only be reported if the package is a binary/executable?
     if self.cache.main_function_id.is_none() {
       diagnostics.push(
         codespan_reporting::diagnostic::Diagnostic::error()
@@ -117,29 +115,41 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       return diagnostics;
     }
 
+    // Perform global type inference & expansion of type variables.
+    for inner_ast in ast_map.values_mut() {
+      for root_node in inner_ast.iter_mut() {
+        // TODO:
+        // root_node
+        //   .kind
+        //   .post_unification(&mut self.type_context, &self.cache);
+      }
+    }
+
     let readonly_ast = ast_map
       .into_values()
       .flatten()
       .into_iter()
-      .map(|node| std::rc::Rc::new(node))
+      // REVIEW: Why did we have it be `Rc<>` in the first place?
+      // .map(|node| std::rc::Rc::new(node))
       .collect::<Vec<_>>();
 
     // Once symbols are resolved, we can proceed to the other phases.
     for root_node in &readonly_ast {
-      root_node.check(&mut self.type_context, &self.cache);
+      // root_node.kind.traverse(|node| {
+      //   node.check(&mut self.type_context, &self.cache);
+      //   node.lint(&mut self.lint_context);
 
-      // TODO: Can we mix linting with type-checking without any problems?
-      root_node.lint(&self.cache, &mut self.lint_context);
+      //   true
+      // });
     }
 
     self.lint_context.finalize(&self.cache);
 
-    let semantic_check_result =
-      gecko::semantic_check::SemanticCheckContext::run(&readonly_ast, &self.cache);
+    let type_check_result = gecko::type_system::TypeContext::run(&readonly_ast, &self.cache);
 
     // FIXME: Make use of the returned imports!
 
-    diagnostics.extend(semantic_check_result.0);
+    diagnostics.extend(type_check_result);
     diagnostics.extend(self.lint_context.diagnostics.clone());
 
     // TODO: Any way for better efficiency (less loops)?
@@ -161,8 +171,9 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
     for root_node in &readonly_ast {
       if let gecko::ast::NodeKind::Function(function) = &root_node.kind {
         // Only lower the main function.
-        if function.name == gecko::llvm_lowering::MAIN_FUNCTION_NAME {
-          root_node.lower(&mut self.llvm_generator, &self.cache, false);
+        if function.name == gecko::lowering::MAIN_FUNCTION_NAME {
+          // TODO:
+          // root_node.lower(&mut self.llvm_generator, &self.cache, false);
 
           // TODO: Need to manually cache the main function here. This is because
           // ... if it is called once again, since it isn't cached, it will be re-lowered.

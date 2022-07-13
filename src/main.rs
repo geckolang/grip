@@ -8,6 +8,7 @@ mod build;
 mod console;
 mod dependency;
 mod package;
+mod pass;
 
 // TODO: Consider replacing this to a "lex" subcommand.
 const ARG_LIST_TOKENS: &str = "tokens";
@@ -106,6 +107,11 @@ async fn run() -> Result<(), String> {
     let mut driver = build::Driver::new(&llvm_context, &llvm_module);
     let mut build_queue = std::collections::VecDeque::new();
     let mut is_initial_package = true;
+
+    // TODO: Here, we're currently processing all packages and modules. This isn't the
+    // ... way to go, because it is not incremental. The right approach should be to start
+    // ... from the initial package's entry file, and depending on its imports, continue from
+    // ... there on.
 
     build_queue.push_front(package_manifest.clone());
 
@@ -358,14 +364,5 @@ async fn main() {
       log::error!("{}", error_message);
       std::process::exit(1);
     }
-  }
-}
-
-// TODO: Consider expanding this function (or re-structuring it).
-fn print_or_write_output(output: String, output_file_path: &std::path::PathBuf, print: bool) {
-  if print {
-    println!("{}", output);
-  } else if let Err(error) = std::fs::write(output_file_path, output) {
-    log::error!("failed to write output file: {}", error);
   }
 }

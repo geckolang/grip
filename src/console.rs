@@ -42,18 +42,13 @@ pub fn print_diagnostic(
 
   let config = codespan_reporting::term::Config::default();
   let mut codespan_files = codespan_reporting::files::SimpleFiles::new();
-  let mut final_diagnostic = diagnostic.clone();
 
   for file in files {
     codespan_files.add(file.0, file.1);
   }
 
-  let emit_result = codespan_reporting::term::emit(
-    &mut writer.lock(),
-    &config,
-    &codespan_files,
-    &final_diagnostic,
-  );
+  let emit_result =
+    codespan_reporting::term::emit(&mut writer.lock(), &config, &codespan_files, &diagnostic);
 
   if let Err(error) = emit_result {
     eprintln!("failed to emit diagnostic to the console: {}", error);

@@ -50,19 +50,3 @@ fn is_dependency_cyclic(dependency_graph: &DependencyGraph, dependency_name: Str
 
   false
 }
-
-fn find_most_used_dependency(dependency_graph: DependencyGraph) -> Option<String> {
-  let mut most_used = None;
-  let mut count_buffer = 0;
-
-  for (dependency_name, dependencies) in dependency_graph {
-    let dependency_count = dependencies.len();
-
-    if dependency_count > count_buffer {
-      most_used = Some(dependency_name);
-      count_buffer = dependency_count;
-    }
-  }
-
-  most_used
-}
