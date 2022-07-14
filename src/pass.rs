@@ -1,8 +1,9 @@
-use gecko::visitor::AnalysisVisitor;
+use gecko::visitor::{AnalysisVisitor, LoweringVisitor};
 
-pub type PassAction = dyn FnOnce() -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>>;
+pub type PassAction =
+  dyn FnOnce(&mut PassManager) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>>;
 
-struct PassManager {
+pub struct PassManager {
   cache: gecko::cache::Cache,
   thunks: std::collections::VecDeque<Box<PassAction>>,
   global_scopes:
@@ -20,7 +21,7 @@ impl PassManager {
     }
   }
 
-  fn name_resolution_decl(
+  pub fn add_name_resolution_decl(
     &mut self,
     module_qualifier: gecko::name_resolution::Qualifier,
     root_node: std::rc::Rc<gecko::ast::Node>,
@@ -33,7 +34,7 @@ impl PassManager {
     name_res_decl.diagnostics
   }
 
-  fn name_resolution_link(
+  pub fn add_name_resolution_link(
     &mut self,
     module_qualifier: gecko::name_resolution::Qualifier,
     root_node: std::rc::Rc<gecko::ast::Node>,
@@ -46,7 +47,7 @@ impl PassManager {
     name_res_link.diagnostics
   }
 
-  fn type_inference(
+  pub fn add_type_inference(
     &mut self,
     root_node: std::rc::Rc<gecko::ast::Node>,
   ) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
@@ -60,8 +61,8 @@ impl PassManager {
     type_inference.diagnostics
   }
 
-  fn analysis(
-    &mut self,
+  pub fn add_analysis(
+    &self,
     root_node: std::rc::Rc<gecko::ast::Node>,
   ) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
     let mut type_check = gecko::type_check::TypeCheckContext::new(&self.cache);
@@ -80,17 +81,27 @@ impl PassManager {
       .collect()
   }
 
-  fn then(&mut self, thunk: Box<PassAction>) -> &mut Self {
-    self.thunks.push_back(thunk);
+  pub fn add_lowering(
+    &self,
+    module_name: &str,
+    root_node: std::rc::Rc<gecko::ast::Node>,
+  ) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
+    let llvm_context = inkwell::context::Context::create();
+    let llvm_module = llvm_context.create_module(module_name);
 
-    self
+    let mut lowering_context =
+      gecko::lowering::LoweringContext::new(&self.cache, &llvm_context, &llvm_module);
+
+    LoweringVisitor::dispatch(&mut lowering_context, &root_node);
+
+    Vec::new()
   }
 
-  fn run(&mut self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
+  pub fn run(&mut self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
     let mut aggregated_diagnostics = Vec::new();
 
     while let Some(thunk) = self.thunks.pop_front() {
-      let diagnostics = thunk();
+      let diagnostics = thunk(self);
 
       let break_flag = diagnostics
         .iter()
@@ -105,24 +116,4 @@ impl PassManager {
 
     return aggregated_diagnostics;
   }
-}
-
-fn test_passes() {
-  let mut pass_manager = PassManager::new();
-  let mut root_node = std::rc::Rc::new(todo!());
-  let mut module_qualifier: gecko::name_resolution::Qualifier = todo!();
-
-  pass_manager
-    .then(Box::new(|| {
-      pass_manager.name_resolution_decl(module_qualifier.clone(), root_node);
-
-      todo!()
-    }))
-    .then(Box::new(|| {
-      pass_manager.name_resolution_decl(module_qualifier.clone(), root_node);
-
-      todo!()
-    }));
-
-  pass_manager.run();
 }

@@ -1,4 +1,4 @@
-use crate::package;
+use crate::{package, pass};
 use gecko::type_system::Check;
 
 /// Serves as the driver for the Gecko compiler.
@@ -66,7 +66,6 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
 
     // FIXME: This function may be too complex (too many loops). Find a way to simplify the loops?
 
-    let mut diagnostics = Vec::new();
     let mut ast_map = std::collections::BTreeMap::new();
 
     // Read, lex, parse, perform name resolution (declarations)
@@ -78,7 +77,10 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       let root_nodes = match parser.parse_all() {
         Ok(nodes) => nodes,
         Err(diagnostic) => return vec![diagnostic],
-      };
+      }
+      .into_iter()
+      .map(|root_node| std::rc::Rc::new(root_node))
+      .collect::<Vec<_>>();
 
       // TODO: File names need to conform to identifier rules.
       let source_file_name = source_file
@@ -96,92 +98,63 @@ impl<'a, 'ctx> Driver<'a, 'ctx> {
       );
     }
 
-    // After all the ASTs have been collected, perform name resolution.
-    // diagnostics.extend(self.name_resolver.run(&mut ast_map, &mut self.cache));
+    ////////////////////////////////////////////////////////////////////////////
+
+    // TODO: Unsafe unwrap.
+    let root_node = ast_map.values().flatten().find(|node| {
+          matches!(&node.kind, gecko::ast::NodeKind::Function(function) if function.name == gecko::lowering::MAIN_FUNCTION_NAME)
+        }).unwrap().to_owned();
+
+    // TODO:
+    // codespan_reporting::diagnostic::Diagnostic::error().with_message("no main function defined")
+
+    let module_qualifier: gecko::name_resolution::Qualifier = gecko::name_resolution::Qualifier {
+      module_name: "test_mod".to_string(),
+      package_name: "test_pkg".to_string(),
+    };
+
+    let mut pass_manager = pass::PassManager::new();
+
+    pass_manager.add_name_resolution_decl(module_qualifier.clone(), std::rc::Rc::clone(&root_node));
+    pass_manager.add_name_resolution_link(module_qualifier.clone(), std::rc::Rc::clone(&root_node));
+    pass_manager.add_type_inference(root_node.clone());
+    pass_manager.add_analysis(root_node.clone());
 
     // FIXME: This should only be reported if the package is a binary/executable?
-    if self.cache.main_function_id.is_none() {
-      diagnostics.push(
-        codespan_reporting::diagnostic::Diagnostic::error()
-          .with_message("no main function defined"),
-      );
-    }
+    pass_manager.add_lowering("pending", root_node.clone());
 
-    // Cannot continue to other phases if name resolution failed.
-    if diagnostics
-      .iter()
-      .any(|diagnostic| diagnostic.severity == codespan_reporting::diagnostic::Severity::Error)
-    {
-      return diagnostics;
-    }
+    pass_manager.run()
 
-    // Perform global type inference & expansion of type variables.
-    for inner_ast in ast_map.values_mut() {
-      for root_node in inner_ast.iter_mut() {
-        // TODO:
-        // root_node
-        //   .kind
-        //   .post_unification(&mut self.type_context, &self.cache);
-      }
-    }
+    // TODO: We should have diagnostics ordered/sorted (by severity then phase).
+    //pass_manager.name_resolution_decl(module_qualifier.clone(), std::rc::Rc::clone(&root_node));
+    // .then(Box::new(|| pass_manager.type_inference(root_node.clone())))
+    // .then(Box::new(|| pass_manager.analysis(root_node.clone())))
+    // .then(Box::new(|| {
+    //   // FIXME: This should only be reported if the package is a binary/executable?
+    //   pass_manager.lowering("pending", root_node.clone())
+    // }))
+    // .run();
 
-    let readonly_ast = ast_map
-      .into_values()
-      .flatten()
-      .into_iter()
-      // REVIEW: Why did we have it be `Rc<>` in the first place?
-      // .map(|node| std::rc::Rc::new(node))
-      .collect::<Vec<_>>();
+    // d
+    // vec![]
+    ////////////////////////////////////////////////////////////////////////////
 
-    // Once symbols are resolved, we can proceed to the other phases.
-    for root_node in &readonly_ast {
-      // root_node.kind.traverse(|node| {
-      //   node.check(&mut self.type_context, &self.cache);
-      //   node.lint(&mut self.lint_context);
-
-      //   true
-      // });
-    }
-
-    self.lint_context.finalize(&self.cache);
-
-    let type_check_result = gecko::type_system::TypeContext::run(&readonly_ast, &self.cache);
-
-    // FIXME: Make use of the returned imports!
-
-    diagnostics.extend(type_check_result);
-    diagnostics.extend(self.lint_context.diagnostics.clone());
-
-    // TODO: Any way for better efficiency (less loops)?
-    // Lowering cannot proceed if there was an error.
-    if diagnostics
-      .iter()
-      .any(|diagnostic| diagnostic.severity == codespan_reporting::diagnostic::Severity::Error)
-    {
-      return diagnostics;
-    }
-
-    // REVISE: For efficiency, and to solve caching issues, only lower the `main` function here.
-    // ... Any referenced entity within it (thus the whole program) will be lowered and cached
-    // ... accordingly from there on.
     // BUG: Extern functions shouldn't be lowered directly. They are no longer under a wrapper
     // ... node, which ensures their caching. This means that, first they will be forcefully lowered
     // ... here (without caching), then when referenced, since they haven't been cached.
     // Once symbols are resolved, we can proceed to the other phases.
-    for root_node in &readonly_ast {
-      if let gecko::ast::NodeKind::Function(function) = &root_node.kind {
-        // Only lower the main function.
-        if function.name == gecko::lowering::MAIN_FUNCTION_NAME {
-          // TODO:
-          // root_node.lower(&mut self.llvm_generator, &self.cache, false);
+    // for root_node in &readonly_ast {
+    //   if let gecko::ast::NodeKind::Function(function) = &root_node.kind {
+    //     // Only lower the main function.
+    //     if function.name == gecko::lowering::MAIN_FUNCTION_NAME {
+    //       // TODO:
+    //       // root_node.lower(&mut self.llvm_generator, &self.cache, false);
 
-          // TODO: Need to manually cache the main function here. This is because
-          // ... if it is called once again, since it isn't cached, it will be re-lowered.
-        }
-      }
-    }
-
-    // TODO: We should have diagnostics ordered/sorted (by severity then phase).
-    diagnostics
+    //       // TODO: Need to manually cache the main function here. This is because
+    //       // ... if it is called once again, since it isn't cached, it will be re-lowered.
+    //     }
+    //   }
+    // }
+    // diagnostics
   }
 }
